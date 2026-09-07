@@ -427,11 +427,10 @@ def get_equipos(
             print(f"  ✅ Filtro estado aplicado: {estado}")
         
         if marca and marca != '':
+            # Usar ILIKE para búsqueda insensible a mayúsculas/minúsculas
             query += " AND ma.nombre ILIKE %s"
             params.append(f'%{marca}%')
             print(f"  ✅ Filtro marca aplicado: {marca}")
-        else:
-            print(f"  ⚠️ No se aplicó filtro marca (vacío)")
         
         if modelo and modelo != '':
             query += " AND m.nombre ILIKE %s"
