@@ -437,7 +437,12 @@ def get_equipos(
         print(f"📝 Params: {params}")
         
         cursor.execute(query, params)
-        return cursor.fetchall()
+        resultados = cursor.fetchall()
+        print(f"📊 Resultados encontrados: {len(resultados)}")
+        return resultados
+    except Exception as e:
+        print(f"❌ Error en get_equipos: {e}")
+        raise
     finally:
         cursor.close()
         conn.close()
