@@ -668,6 +668,27 @@ def eliminar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
     finally:
         cursor.close()
         conn.close()
+@app.put("/api/usuarios/{id_usuario}/activar")
+def activar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
+    """Activar un usuario (solo admin)"""
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            UPDATE usuarios SET activo = TRUE WHERE id = %s
+        """, (id_usuario,))
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Usuario no encontrado")
+        
+        conn.commit()
+        return {"success": True, "message": "Usuario activado correctamente"}
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
 
 # ============================================
 # INICIO DEL SERVIDOR
