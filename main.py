@@ -52,7 +52,16 @@ def verify_password(password: str, hashed: str) -> bool:
     """Verificar una contraseña contra su hash"""
     if not hashed:
         return False
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    try:
+        # Si el hash no empieza con $2b$, es texto plano
+        if not hashed.startswith('$2b$'):
+            # Si es texto plano, comparar directamente
+            # (solo para migración temporal)
+            return password == hashed
+        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+    except Exception as e:
+        print(f"❌ Error verificando contraseña: {e}")
+        return False
 
 def create_jwt_token(user_id: str, email: str, rol: str) -> str:
     """Crear un token JWT"""
