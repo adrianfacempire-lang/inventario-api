@@ -463,6 +463,53 @@ def get_equipos(
     finally:
         cursor.close()
         conn.close()
+@app.post("/api/equipos")
+def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
+    """Registrar un nuevo equipo (solo admin)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Verificar que el modelo existe
+        cursor.execute("SELECT id FROM modelos WHERE id = %s", (equipo.modelo_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Modelo no encontrado")
+        
+        # Verificar que el IMEI no esté duplicado
+        cursor.execute("SELECT id FROM equipos WHERE imei = %s", (equipo.imei,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="El IMEI ya está registrado")
+        
+        # Insertar el equipo
+        cursor.execute("""
+            INSERT INTO equipos (
+                modelo_id, imei, color, almacenamiento,
+                precio_compra, precio_venta, observaciones
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            equipo.modelo_id,
+            equipo.imei,
+            equipo.color,
+            equipo.almacenamiento,
+            equipo.precio_compra,
+            equipo.precio_venta,
+            equipo.observaciones
+        ))
+        
+        equipo_id = cursor.fetchone()["id"]
+        conn.commit()
+        
+        return {
+            "success": True,
+            "id": equipo_id,
+            "message": "Equipo registrado correctamente"
+        }
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
 # ============================================
 # ENDPOINTS - VENTAS (PROTEGIDOS)
 # ============================================
