@@ -877,6 +877,29 @@ def exportar_ventas(
     finally:
         cursor.close()
         conn.close()
+# ============================================
+# ENDPOINTS - REPORTES
+# ============================================
+
+@app.get("/api/reportes/ventas-hoy")
+def get_ventas_hoy(user = Depends(get_current_user)):
+    """Resumen de ventas del día"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_ventas,
+                COALESCE(SUM(precio_final), 0) as total_ingresos,
+                COUNT(DISTINCT vendedor_id) as vendedores_activos
+            FROM ventas
+            WHERE DATE(fecha_venta) = CURRENT_DATE
+        """)
+        return cursor.fetchone() or {"total_ventas": 0, "total_ingresos": 0, "vendedores_activos": 0}
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.get("/api/reportes/stock-bajo")
 def get_stock_bajo(
     limite: int = 3,
@@ -905,6 +928,25 @@ def get_stock_bajo(
     finally:
         cursor.close()
         conn.close()
+
+@app.get("/api/reportes/resumen")
+def get_resumen(user = Depends(get_current_user)):
+    """Resumen general del inventario"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                (SELECT COUNT(*) FROM equipos) AS total_equipos,
+                (SELECT COUNT(*) FROM equipos WHERE estado = 'disponible') AS disponibles,
+                (SELECT COUNT(*) FROM equipos WHERE estado = 'vendido') AS vendidos,
+                (SELECT COUNT(*) FROM usuarios WHERE activo = TRUE) AS usuarios_activos
+        """)
+        return cursor.fetchone() or {}
+    finally:
+        cursor.close()
+        conn.close()
+
 # ============================================
 # ENDPOINTS - RETIRAR EQUIPO
 # ============================================
