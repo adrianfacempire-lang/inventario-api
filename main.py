@@ -13,7 +13,7 @@ import uuid
 # ============================================
 
 # URL de conexión DIRECTA a Supabase
-DATABASE_URL = "postgresql://postgres:11CNSQJUQ0s1vuGUDELtqG@db.tziufvisbvljkvhnbneu.supabase.co:5432/postgres"
+DATABASE_URL = "postgresql://postgres:11CNSQJUQ0s1vuGUDELtqG@db.tziufvisbvljkvhnbneu.supabase.co:5432/postgres?sslmode=require&connect_timeout=10"
 
 print(f"✅ Conectando a: {DATABASE_URL[:40]}...")
 
