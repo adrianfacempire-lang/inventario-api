@@ -435,6 +435,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        # Verificar que el equipo existe y está disponible
         cursor.execute("SELECT id, estado FROM equipos WHERE id = %s", (venta.equipo_id,))
         equipo = cursor.fetchone()
         if not equipo:
@@ -442,14 +443,17 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         if equipo["estado"] != "disponible":
             raise HTTPException(status_code=400, detail="El equipo no está disponible")
         
-        # Registrar venta con el usuario actual
+        # Obtener el UUID del usuario actual
+        user_id = uuid.UUID(user["sub"])
+        
+        # Registrar la venta
         cursor.execute("""
             INSERT INTO ventas (equipo_id, vendedor_id, precio_final, metodo_pago, cliente_nombre, cliente_telefono, observaciones)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             venta.equipo_id,
-            uuid.UUID(user["sub"]),
+            user_id,
             venta.precio_final,
             venta.metodo_pago,
             venta.cliente_nombre,
@@ -459,8 +463,14 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         
         venta_id = cursor.fetchone()["id"]
         
-        cursor.execute("UPDATE equipos SET estado = 'vendido', fecha_venta = NOW(), vendido_por = %s WHERE id = %s", 
-                       (uuid.UUID(user["sub"]), venta.equipo_id))
+        # Actualizar estado del equipo
+        cursor.execute("""
+            UPDATE equipos 
+            SET estado = 'vendido', 
+                fecha_venta = NOW(), 
+                vendido_por = %s 
+            WHERE id = %s
+        """, (user_id, venta.equipo_id))
         
         conn.commit()
         
@@ -469,6 +479,8 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
             "venta_id": venta_id,
             "message": "Venta registrada correctamente"
         }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Error en el formato del usuario: {str(e)}")
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -684,6 +696,53 @@ def activar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
         
         conn.commit()
         return {"success": True, "message": "Usuario activado correctamente"}
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+# ============================================
+# ENDPOINTS - RETIRAR EQUIPO
+# ============================================
+
+class RetirarEquipoRequest(BaseModel):
+    equipo_id: int
+    razon: str
+
+@app.put("/api/equipos/retirar")
+def retirar_equipo(request: RetirarEquipoRequest, admin = Depends(get_current_admin)):
+    """Retirar un equipo (solo admin) - por daño, falla, etc."""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Verificar que el equipo existe y está disponible
+        cursor.execute("SELECT id, estado, imei FROM equipos WHERE id = %s", (request.equipo_id,))
+        equipo = cursor.fetchone()
+        
+        if not equipo:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado")
+        
+        if equipo["estado"] != "disponible":
+            raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado actual: {equipo['estado']})")
+        
+        # Actualizar estado del equipo a 'retirado'
+        cursor.execute("""
+            UPDATE equipos 
+            SET estado = 'retirado', 
+                observaciones = COALESCE(observaciones, '') || ' | RETIRADO: ' || %s || ' - ' || NOW()::text
+            WHERE id = %s
+            RETURNING id
+        """, (request.razon, request.equipo_id))
+        
+        conn.commit()
+        
+        return {
+            "success": True,
+            "message": f"Equipo {equipo['imei']} retirado correctamente. Razón: {request.razon}"
+        }
+        
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
