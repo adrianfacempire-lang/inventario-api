@@ -67,6 +67,85 @@ def get_db():
         raise
 
 # ============================================
+# ENDPOINTS - AUTENTICACIÓN
+# ============================================
+
+# ============================================
+# ENDPOINTS - AUTENTICACIÓN
+# ============================================
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    device: str = "web"  # web o mobile
+
+@app.post("/api/auth/login")
+def login(request: LoginRequest):
+    """
+    Autenticar usuario según el dispositivo
+    - web: SOLO admins (rol = 'admin')
+    - mobile: admins y vendedores
+    """
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Buscar usuario por email
+        cursor.execute("""
+            SELECT id, email, nombre, rol, activo
+            FROM usuarios
+            WHERE email = %s AND activo = TRUE
+        """, (request.email,))
+        
+        usuario = cursor.fetchone()
+        
+        if not usuario:
+            raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
+        
+        # Verificar contraseña
+        cursor.execute("""
+            SELECT id FROM usuarios
+            WHERE email = %s AND password_hash = %s
+        """, (request.email, request.password))
+        
+        if not cursor.fetchone():
+            raise HTTPException(status_code=401, detail="Contraseña incorrecta")
+        
+        # ============================================
+        # REGLA: SOLO ADMINISTRADORES EN PANEL WEB
+        # ============================================
+        if request.device == "web":
+            # Solo admins pueden acceder al panel web
+            if usuario["rol"] != "admin":
+                raise HTTPException(
+                    status_code=403, 
+                    detail="Acceso denegado. Solo administradores pueden acceder al panel web."
+                )
+        
+        # Si es mobile, cualquier usuario activo puede acceder
+        # (vendedores y admins)
+        
+        # Generar token simple
+        import uuid
+        token = str(uuid.uuid4())
+        
+        return {
+            "success": True,
+            "id": usuario["id"],
+            "email": usuario["email"],
+            "nombre": usuario["nombre"],
+            "rol": usuario["rol"],
+            "token": token
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+# ============================================
 # ENDPOINTS
 # ============================================
 
@@ -294,6 +373,114 @@ def get_ventas_hoy():
             WHERE DATE(fecha_venta) = CURRENT_DATE
         """)
         return cursor.fetchone() or {"total_ventas": 0, "total_ingresos": 0}
+    finally:
+        cursor.close()
+        conn.close()
+@app.get("/api/reportes/ventas")
+def get_ventas(fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = None):
+    """Listar ventas con filtros de fecha"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        query = """
+            SELECT 
+                v.id,
+                v.fecha_venta,
+                e.imei,
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                v.precio_final,
+                v.metodo_pago,
+                v.cliente_nombre,
+                u.nombre AS vendedor
+            FROM ventas v
+            JOIN equipos e ON v.equipo_id = e.id
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            LEFT JOIN usuarios u ON v.vendedor_id = u.id
+            WHERE 1=1
+        """
+        params = []
+        
+        if fecha_inicio:
+            query += " AND v.fecha_venta >= %s"
+            params.append(fecha_inicio)
+        if fecha_fin:
+            query += " AND v.fecha_venta <= %s"
+            params.append(fecha_fin)
+        
+        query += " ORDER BY v.fecha_venta DESC"
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+@app.get("/api/reportes/resumen")
+def get_resumen():
+    """Resumen general del inventario"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                (SELECT COUNT(*) FROM equipos) AS total_equipos,
+                (SELECT COUNT(*) FROM equipos WHERE estado = 'disponible') AS disponibles,
+                (SELECT COUNT(*) FROM equipos WHERE estado = 'vendido') AS vendidos,
+                (SELECT COUNT(*) FROM usuarios WHERE activo = TRUE) AS usuarios_activos
+        """)
+        return cursor.fetchone() or {}
+    finally:
+        cursor.close()
+        conn.close()
+# ============================================
+# ENDPOINTS - USUARIOS
+# ============================================
+
+@app.get("/api/usuarios")
+def get_usuarios():
+    """Listar todos los usuarios"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT id, email, nombre, rol, activo
+            FROM usuarios
+            ORDER BY created_at DESC
+        """)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.post("/api/usuarios")
+def crear_usuario(usuario: UsuarioCreate):
+    """Crear un nuevo usuario"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Verificar que el email no exista
+        cursor.execute("SELECT id FROM usuarios WHERE email = %s", (usuario.email,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="El email ya está registrado")
+        
+        cursor.execute("""
+            INSERT INTO usuarios (email, nombre, rol)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        """, (usuario.email, usuario.nombre, usuario.rol))
+        
+        new_id = cursor.fetchone()["id"]
+        conn.commit()
+        
+        return {
+            "success": True,
+            "id": new_id,
+            "message": "Usuario creado correctamente"
+        }
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
