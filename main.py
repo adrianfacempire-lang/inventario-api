@@ -125,9 +125,10 @@ class VentaCreate(BaseModel):
 
 class UsuarioCreate(BaseModel):
     email: str
-    password: str
+    password: str = ""  # Opcional para edición
     nombre: str
     rol: str = "vendedor"
+    activo: bool = True  # Para edición
 
 class LoginRequest(BaseModel):
     email: str
