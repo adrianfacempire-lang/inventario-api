@@ -1,26 +1,18 @@
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import psycopg2
 import psycopg2.extras
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import os
 import uuid
-import bcrypt
-import jwt
 
 # ============================================
 # CONFIGURACIÓN
 # ============================================
 
-# URL de conexión a Supabase
 DATABASE_URL = "postgresql://postgres.tziufvisbvljkvhnbneu:11CNSQJUQ0s1vuGUDELtqG@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
-
-# Clave secreta para JWT (¡CAMBIAR EN PRODUCCIÓN!)
-SECRET_KEY = "tu_clave_secreta_muy_segura_cambiar_en_produccion_2026"
-ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 24
 
 print(f"✅ Conectando a: {DATABASE_URL[:40]}...")
 
@@ -38,76 +30,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ============================================
-# FUNCIONES DE SEGURIDAD
-# ============================================
-
-def hash_password(password: str) -> str:
-    """Hashear una contraseña con bcrypt"""
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
-
-def verify_password(password: str, hashed: str) -> bool:
-    """Verificar una contraseña contra su hash"""
-    if not hashed:
-        return False
-    try:
-        # Si el hash no empieza con $2b$, es texto plano
-        if not hashed.startswith('$2b$'):
-            # Si es texto plano, comparar directamente
-            # (solo para migración temporal)
-            return password == hashed
-        return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-    except Exception as e:
-        print(f"❌ Error verificando contraseña: {e}")
-        return False
-
-def create_jwt_token(user_id: str, email: str, rol: str) -> str:
-    """Crear un token JWT"""
-    payload = {
-        "sub": user_id,
-        "email": email,
-        "rol": rol,
-        "exp": datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS),
-        "iat": datetime.utcnow()
-    }
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-def verify_jwt_token(token: str) -> dict:
-    """Verificar un token JWT"""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expirado. Vuelve a iniciar sesión.")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Token inválido.")
-
-# ============================================
-# DEPENDENCIAS PARA PROTEGER ENDPOINTS
-# ============================================
-
-def get_current_user(authorization: str = Header(None)):
-    """Obtener el usuario actual desde el token JWT"""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Token requerido. Inicia sesión primero.")
-    
-    try:
-        scheme, token = authorization.split(" ")
-        if scheme.lower() != "bearer":
-            raise HTTPException(status_code=401, detail="Formato de token inválido. Usa 'Bearer [token]'")
-        
-        payload = verify_jwt_token(token)
-        return payload
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Formato de token inválido.")
-
-def get_current_admin(user = Depends(get_current_user)):
-    """Verificar que el usuario sea admin"""
-    if user.get("rol") != "admin":
-        raise HTTPException(status_code=403, detail="Se requieren permisos de administrador.")
-    return user
 
 # ============================================
 # MODELOS DE DATOS
@@ -158,7 +80,6 @@ def get_db():
 # ENDPOINTS - AUTENTICACIÓN
 # ============================================
 
-
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
     """
@@ -181,7 +102,7 @@ def login(request: LoginRequest):
         if not usuario:
             raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
         
-        # Verificación en texto plano (temporal)
+        # Verificación en texto plano
         if usuario["password_hash"] != request.password:
             raise HTTPException(status_code=401, detail="Contraseña incorrecta")
         
@@ -192,8 +113,7 @@ def login(request: LoginRequest):
                 detail="Acceso denegado. Solo administradores pueden acceder al panel web."
             )
         
-        # ✅ USAR UUID SIMPLE (en lugar de JWT)
-        import uuid
+        # Generar token simple
         token = str(uuid.uuid4())
         
         return {
@@ -212,6 +132,7 @@ def login(request: LoginRequest):
     finally:
         cursor.close()
         conn.close()
+
 # ============================================
 # ENDPOINTS - PÚBLICOS
 # ============================================
@@ -222,7 +143,7 @@ def root():
         "message": "API Inventario Teléfonos",
         "version": "2.0.0",
         "status": "online",
-        "secure": True
+        "secure": False  # Temporal
     }
 
 @app.get("/api/health")
@@ -343,12 +264,12 @@ def get_modelos():
         conn.close()
 
 # ============================================
-# ENDPOINTS - EQUIPOS (PROTEGIDOS)
+# ENDPOINTS - EQUIPOS (SIN AUTENTICACIÓN - TEMPORAL)
 # ============================================
 
 @app.post("/api/equipos")
-def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
-    """Registrar un nuevo equipo (solo admin)"""
+def registrar_equipo(equipo: EquipoCreate):
+    """Registrar un nuevo equipo (TEMPORAL - sin autenticación)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -392,12 +313,12 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
         conn.close()
 
 # ============================================
-# ENDPOINTS - VENTAS (PROTEGIDOS)
+# ENDPOINTS - VENTAS (SIN AUTENTICACIÓN - TEMPORAL)
 # ============================================
 
 @app.post("/api/ventas")
-def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
-    """Registrar una venta (admin o vendedor)"""
+def registrar_venta(venta: VentaCreate):
+    """Registrar una venta (TEMPORAL - sin autenticación)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -408,14 +329,12 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         if equipo["estado"] != "disponible":
             raise HTTPException(status_code=400, detail="El equipo no está disponible")
         
-        # Registrar venta con el usuario actual
         cursor.execute("""
-            INSERT INTO ventas (equipo_id, vendedor_id, precio_final, metodo_pago, cliente_nombre, cliente_telefono, observaciones)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO ventas (equipo_id, precio_final, metodo_pago, cliente_nombre, cliente_telefono, observaciones)
+            VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             venta.equipo_id,
-            uuid.UUID(user["sub"]),
             venta.precio_final,
             venta.metodo_pago,
             venta.cliente_nombre,
@@ -425,8 +344,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         
         venta_id = cursor.fetchone()["id"]
         
-        cursor.execute("UPDATE equipos SET estado = 'vendido', fecha_venta = NOW(), vendido_por = %s WHERE id = %s", 
-                       (uuid.UUID(user["sub"]), venta.equipo_id))
+        cursor.execute("UPDATE equipos SET estado = 'vendido', fecha_venta = NOW() WHERE id = %s", (venta.equipo_id,))
         
         conn.commit()
         
@@ -443,11 +361,11 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         conn.close()
 
 # ============================================
-# ENDPOINTS - REPORTES (PROTEGIDOS)
+# ENDPOINTS - REPORTES (SIN AUTENTICACIÓN - TEMPORAL)
 # ============================================
 
 @app.get("/api/reportes/ventas-hoy")
-def get_ventas_hoy(user = Depends(get_current_user)):
+def get_ventas_hoy():
     """Resumen de ventas del día"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -465,7 +383,7 @@ def get_ventas_hoy(user = Depends(get_current_user)):
         conn.close()
 
 @app.get("/api/reportes/ventas")
-def get_ventas(fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = None, user = Depends(get_current_user)):
+def get_ventas(fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = None):
     """Listar ventas con filtros de fecha"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -506,7 +424,7 @@ def get_ventas(fecha_inicio: Optional[str] = None, fecha_fin: Optional[str] = No
         conn.close()
 
 @app.get("/api/reportes/resumen")
-def get_resumen(user = Depends(get_current_user)):
+def get_resumen():
     """Resumen general del inventario"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
@@ -524,7 +442,7 @@ def get_resumen(user = Depends(get_current_user)):
         conn.close()
 
 # ============================================
-# ENDPOINTS - USUARIOS (SOLO ADMIN)
+# ENDPOINTS - USUARIOS (SIN AUTENTICACIÓN - TEMPORAL)
 # ============================================
 
 @app.get("/api/usuarios")
@@ -568,139 +486,6 @@ def crear_usuario(usuario: UsuarioCreate):
             "message": "Usuario creado correctamente"
         }
     except psycopg2.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
-@app.post("/api/usuarios")
-def crear_usuario(usuario: UsuarioCreate, admin = Depends(get_current_admin)):
-    """Crear un nuevo usuario (solo admin)"""
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    try:
-        # Verificar que el email no exista
-        cursor.execute("SELECT id FROM usuarios WHERE email = %s", (usuario.email,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail="El email ya está registrado")
-        
-        # Hashear contraseña
-        hashed_password = hash_password(usuario.password)
-        
-        cursor.execute("""
-            INSERT INTO usuarios (email, nombre, rol, password_hash)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
-        """, (usuario.email, usuario.nombre, usuario.rol, hashed_password))
-        
-        new_id = cursor.fetchone()["id"]
-        conn.commit()
-        
-        return {
-            "success": True,
-            "id": new_id,
-            "message": "Usuario creado correctamente"
-        }
-    except psycopg2.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.put("/api/usuarios/{id_usuario}")
-def actualizar_usuario(id_usuario: str, usuario: UsuarioCreate, admin = Depends(get_current_admin)):
-    """Actualizar un usuario (solo admin)"""
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    try:
-        # Verificar que el usuario existe
-        cursor.execute("SELECT id FROM usuarios WHERE id = %s", (id_usuario,))
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        
-        # Hashear nueva contraseña si se proporciona
-        hashed_password = hash_password(usuario.password) if usuario.password else None
-        
-        if hashed_password:
-            cursor.execute("""
-                UPDATE usuarios 
-                SET email = %s, nombre = %s, rol = %s, password_hash = %s
-                WHERE id = %s
-            """, (usuario.email, usuario.nombre, usuario.rol, hashed_password, id_usuario))
-        else:
-            cursor.execute("""
-                UPDATE usuarios 
-                SET email = %s, nombre = %s, rol = %s
-                WHERE id = %s
-            """, (usuario.email, usuario.nombre, usuario.rol, id_usuario))
-        
-        conn.commit()
-        return {"success": True, "message": "Usuario actualizado correctamente"}
-    except psycopg2.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.delete("/api/usuarios/{id_usuario}")
-def eliminar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
-    """Eliminar (desactivar) un usuario (solo admin)"""
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            UPDATE usuarios SET activo = FALSE WHERE id = %s
-        """, (id_usuario,))
-        
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        
-        conn.commit()
-        return {"success": True, "message": "Usuario desactivado correctamente"}
-    except psycopg2.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
-
-# ============================================
-# ENDPOINT - MIGRAR CONTRASEÑAS (SOLO ADMIN)
-# ============================================
-
-@app.post("/api/auth/migrar-passwords")
-def migrar_passwords(admin = Depends(get_current_admin)):
-    """Migrar contraseñas en texto plano a hashed (solo admin)"""
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    try:
-        cursor.execute("""
-            SELECT id, email, password_hash 
-            FROM usuarios 
-            WHERE password_hash IS NOT NULL 
-            AND password_hash != ''
-            AND (LENGTH(password_hash) < 50 OR password_hash NOT LIKE '$2b$%')
-        """)
-        
-        usuarios = cursor.fetchall()
-        actualizados = 0
-        
-        for u in usuarios:
-            hashed = hash_password(u["password_hash"])
-            cursor.execute(
-                "UPDATE usuarios SET password_hash = %s WHERE id = %s",
-                (hashed, u["id"])
-            )
-            actualizados += 1
-        
-        conn.commit()
-        return {
-            "success": True,
-            "message": f"Se actualizaron {actualizados} contraseñas"
-        }
-    except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
