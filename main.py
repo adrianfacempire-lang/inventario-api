@@ -393,6 +393,7 @@ def get_equipos(
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        # Construir la query base
         query = """
             SELECT 
                 e.id,
@@ -412,34 +413,37 @@ def get_equipos(
         params = []
         
         # Depuración: imprimir los parámetros recibidos
-        print(f"🔍 Parámetros recibidos:")
+        print(f"🔍 Parámetros recibidos en get_equipos:")
         print(f"  estado: {estado}")
         print(f"  marca: {marca}")
         print(f"  modelo: {modelo}")
         print(f"  fecha_inicio: {fecha_inicio}")
         print(f"  fecha_fin: {fecha_fin}")
         
-        if estado:
+        # Aplicar filtros SOLO si tienen valor
+        if estado and estado != '':
             query += " AND e.estado = %s"
             params.append(estado)
             print(f"  ✅ Filtro estado aplicado: {estado}")
         
-        if marca:
+        if marca and marca != '':
             query += " AND ma.nombre ILIKE %s"
             params.append(f'%{marca}%')
             print(f"  ✅ Filtro marca aplicado: {marca}")
+        else:
+            print(f"  ⚠️ No se aplicó filtro marca (vacío)")
         
-        if modelo:
+        if modelo and modelo != '':
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
             print(f"  ✅ Filtro modelo aplicado: {modelo}")
         
-        if fecha_inicio:
+        if fecha_inicio and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
             print(f"  ✅ Filtro fecha_inicio aplicado: {fecha_inicio}")
         
-        if fecha_fin:
+        if fecha_fin and fecha_fin != '':
             query += " AND e.fecha_ingreso <= %s"
             params.append(fecha_fin)
             print(f"  ✅ Filtro fecha_fin aplicado: {fecha_fin}")
