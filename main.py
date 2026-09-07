@@ -158,6 +158,7 @@ def get_db():
 # ENDPOINTS - AUTENTICACIÓN
 # ============================================
 
+
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
     """
@@ -180,8 +181,9 @@ def login(request: LoginRequest):
         if not usuario:
             raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
         
-        # Verificar contraseña con bcrypt
-        if not verify_password(request.password, usuario["password_hash"]):
+        # ⚠️ TEMPORAL: Verificación en texto plano
+        # PRONTO: Se migrará a bcrypt
+        if usuario["password_hash"] != request.password:
             raise HTTPException(status_code=401, detail="Contraseña incorrecta")
         
         # REGLA: SOLO ADMINISTRADORES EN PANEL WEB
@@ -191,12 +193,9 @@ def login(request: LoginRequest):
                 detail="Acceso denegado. Solo administradores pueden acceder al panel web."
             )
         
-        # Crear JWT token
-        token = create_jwt_token(
-            str(usuario["id"]),
-            usuario["email"],
-            usuario["rol"]
-        )
+        # Generar token simple (temporal)
+        import uuid
+        token = str(uuid.uuid4())
         
         return {
             "success": True,
@@ -214,7 +213,6 @@ def login(request: LoginRequest):
     finally:
         cursor.close()
         conn.close()
-
 # ============================================
 # ENDPOINTS - PÚBLICOS
 # ============================================
