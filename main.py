@@ -9,13 +9,27 @@ import os
 import uuid
 
 # ============================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN - SOLUCIÓN DEFINITIVA
 # ============================================
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# Intentar obtener DATABASE_URL de diferentes formas
+DATABASE_URL = (
+    os.environ.get("DATABASE_URL") or
+    os.environ.get("database_url") or
+    os.environ.get("DATABASE") or
+    os.environ.get("SUPABASE_DATABASE_URL") or
+    os.environ.get("POSTGRES_URL")
+)
 
+# Si no se encuentra, mostrar todas las variables disponibles
 if not DATABASE_URL:
+    print("❌ ERROR: No se encontró DATABASE_URL")
+    print("📋 Variables de entorno disponibles:")
+    for key, value in os.environ.items():
+        print(f"  {key}: {value[:20] if value else 'None'}...")
     raise Exception("DATABASE_URL no configurada. Agrega la variable de entorno.")
+
+print(f"✅ DATABASE_URL encontrada: {DATABASE_URL[:30]}...")
 
 app = FastAPI(
     title="API Inventario Teléfonos",
@@ -40,7 +54,7 @@ class UsuarioCreate(BaseModel):
     email: str
     password: str
     nombre: str
-    rol: str = "vendedor"  # admin o vendedor
+    rol: str = "vendedor"
 
 class UsuarioResponse(BaseModel):
     id: str
@@ -93,7 +107,12 @@ class LoginRequest(BaseModel):
 
 def get_db():
     """Obtener conexión a la base de datos"""
-    return psycopg2.connect(DATABASE_URL)
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        print(f"❌ Error conectando a la base de datos: {e}")
+        raise
 
 def verificar_rol(usuario_id: str, rol_requerido: str):
     """Verificar si un usuario tiene el rol requerido"""
@@ -255,9 +274,7 @@ def get_stock_modelo(modelo_id: int):
 
 @app.post("/api/equipos", response_model=dict)
 def registrar_equipo(equipo: EquipoCreate, usuario_id: str):
-    """
-    Registrar un nuevo equipo (solo administradores)
-    """
+    """Registrar un nuevo equipo (solo administradores)"""
     # Verificar que el usuario es admin
     if not verificar_rol(usuario_id, "admin"):
         raise HTTPException(
@@ -328,9 +345,7 @@ def registrar_equipo(equipo: EquipoCreate, usuario_id: str):
 
 @app.post("/api/ventas", response_model=dict)
 def registrar_venta(venta: VentaCreate, usuario_id: str):
-    """
-    Registrar una venta (vendedores y administradores)
-    """
+    """Registrar una venta (vendedores y administradores)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
