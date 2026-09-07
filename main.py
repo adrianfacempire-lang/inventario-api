@@ -433,12 +433,14 @@ def get_equipos(
         
         query += " ORDER BY e.id DESC"
         
+        print(f"📝 Query: {query}")
+        print(f"📝 Params: {params}")
+        
         cursor.execute(query, params)
         return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
-
 # ============================================
 # ENDPOINTS - VENTAS (PROTEGIDOS)
 # ============================================
