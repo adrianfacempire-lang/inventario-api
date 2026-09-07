@@ -53,6 +53,17 @@ class VentaCreate(BaseModel):
     cliente_telefono: Optional[str] = None
     observaciones: Optional[str] = None
 
+
+class UsuarioCreate(BaseModel):
+    email: str
+    password: str
+    nombre: str
+    rol: str = "vendedor"
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    device: str = "web"
 # ============================================
 # FUNCIONES DE BASE DE DATOS
 # ============================================
