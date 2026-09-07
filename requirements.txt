@@ -2,6 +2,6 @@ fastapi
 uvicorn
 psycopg2-binary
 python-multipart
-python-dotenv
 bcrypt
 PyJWT
+python-dotenv
