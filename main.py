@@ -429,35 +429,42 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
 # ENDPOINTS - VENTAS (PROTEGIDOS)
 # ============================================
 
-# ============================================
-# ENDPOINTS - VENTAS (PROTEGIDOS)
-# ============================================
-
 @app.post("/api/ventas")
 def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
     """Registrar una venta (admin o vendedor)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        print(f"📝 Registrando venta: equipo_id={venta.equipo_id}")
-        print(f"👤 Usuario: {user.get('sub')}")
+        print(f"📝 === INICIANDO REGISTRO DE VENTA ===")
+        print(f"📝 equipo_id: {venta.equipo_id}")
+        print(f"📝 precio_final: {venta.precio_final}")
+        print(f"👤 Usuario sub: {user.get('sub')}")
+        print(f"👤 Usuario email: {user.get('email')}")
         
         # Verificar que el equipo existe y está disponible
         cursor.execute("SELECT id, estado, imei FROM equipos WHERE id = %s", (venta.equipo_id,))
         equipo = cursor.fetchone()
+        
         if not equipo:
             raise HTTPException(status_code=404, detail="Equipo no encontrado")
+        
         if equipo["estado"] != "disponible":
             raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado: {equipo['estado']})")
         
-        # Obtener el UUID del usuario actual
-        try:
-            user_id = uuid.UUID(user["sub"])
-        except ValueError as e:
-            print(f"❌ Error al convertir UUID: {e}")
-            raise HTTPException(status_code=400, detail=f"Error en el formato del usuario: {str(e)}")
+        # Obtener el ID del usuario actual (como string, sin convertir a UUID)
+        user_id_str = user.get("sub")
+        print(f"👤 user_id_str: {user_id_str}")
         
-        # Registrar la venta
+        # Verificar que el usuario existe en la tabla usuarios
+        cursor.execute("SELECT id FROM usuarios WHERE id = %s", (user_id_str,))
+        usuario_existe = cursor.fetchone()
+        if not usuario_existe:
+            print(f"❌ Usuario no encontrado en la tabla usuarios: {user_id_str}")
+            raise HTTPException(status_code=400, detail="Usuario no encontrado en el sistema")
+        
+        print(f"✅ Usuario encontrado: {usuario_existe['id']}")
+        
+        # Registrar la venta - usar el ID como string
         cursor.execute("""
             INSERT INTO ventas (
                 equipo_id, 
@@ -471,7 +478,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
             RETURNING id
         """, (
             venta.equipo_id,
-            user_id,
+            user_id_str,  # Usar string directamente
             venta.precio_final,
             venta.metodo_pago,
             venta.cliente_nombre,
@@ -482,17 +489,18 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         venta_id = cursor.fetchone()["id"]
         print(f"✅ Venta registrada: ID={venta_id}")
         
-        # Actualizar estado del equipo
+        # Actualizar estado del equipo - usar el ID como string
         cursor.execute("""
             UPDATE equipos 
             SET estado = 'vendido', 
                 fecha_venta = NOW(), 
                 vendido_por = %s 
             WHERE id = %s
-        """, (user_id, venta.equipo_id))
+        """, (user_id_str, venta.equipo_id))
         
         conn.commit()
         print(f"✅ Equipo {equipo['imei']} actualizado a 'vendido'")
+        print(f"✅ === VENTA COMPLETADA EXITOSAMENTE ===")
         
         return {
             "success": True,
@@ -502,10 +510,6 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         
     except HTTPException:
         raise
-    except ValueError as e:
-        conn.rollback()
-        print(f"❌ Error de valor: {e}")
-        raise HTTPException(status_code=400, detail=f"Error en los datos: {str(e)}")
     except psycopg2.Error as e:
         conn.rollback()
         print(f"❌ Error de base de datos: {e}")
@@ -513,6 +517,8 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
     except Exception as e:
         conn.rollback()
         print(f"❌ Error inesperado: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
     finally:
         cursor.close()
