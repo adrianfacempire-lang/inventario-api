@@ -382,10 +382,6 @@ def buscar_por_imei(imei: str, user = Depends(get_current_user)):
 
 import logging
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 @app.get("/api/equipos")
 def get_equipos(
     estado: Optional[str] = None,
@@ -399,7 +395,6 @@ def get_equipos(
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Construir la query base
         query = """
             SELECT 
                 e.id,
@@ -418,58 +413,52 @@ def get_equipos(
         """
         params = []
         
-        # LOGS con logging
-        logger.info(f"🔍 Parámetros recibidos en get_equipos:")
-        logger.info(f"  estado: {estado}")
-        logger.info(f"  marca: {marca}")
-        logger.info(f"  modelo: {modelo}")
-        logger.info(f"  fecha_inicio: {fecha_inicio}")
-        logger.info(f"  fecha_fin: {fecha_fin}")
+        # Logs para depuración
+        print(f"🔍 Parámetros recibidos:")
+        print(f"  estado: {estado}")
+        print(f"  marca: {marca}")
+        print(f"  modelo: {modelo}")
+        print(f"  fecha_inicio: {fecha_inicio}")
+        print(f"  fecha_fin: {fecha_fin}")
         
-        # Aplicar filtros SOLO si tienen valor
-        if estado and estado != '':
+        if estado:
             query += " AND e.estado = %s"
             params.append(estado)
-            logger.info(f"  ✅ Filtro estado aplicado: {estado}")
+            print(f"  ✅ Filtro estado: {estado}")
         
-        if marca and marca != '':
-            query += " AND ma.nombre ILIKE %s"
-            params.append(f'%{marca}%')
-            logger.info(f"  ✅ Filtro marca aplicado: {marca}")
+        if marca:
+            # Usar = en lugar de ILIKE para coincidencia exacta
+            query += " AND ma.nombre = %s"
+            params.append(marca)
+            print(f"  ✅ Filtro marca (exacto): {marca}")
         
-        if modelo and modelo != '':
+        if modelo:
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
-            logger.info(f"  ✅ Filtro modelo aplicado: {modelo}")
+            print(f"  ✅ Filtro modelo: {modelo}")
         
-        if fecha_inicio and fecha_inicio != '':
+        if fecha_inicio:
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
-            logger.info(f"  ✅ Filtro fecha_inicio aplicado: {fecha_inicio}")
+            print(f"  ✅ Filtro fecha_inicio: {fecha_inicio}")
         
-        if fecha_fin and fecha_fin != '':
+        if fecha_fin:
             query += " AND e.fecha_ingreso <= %s"
             params.append(fecha_fin)
-            logger.info(f"  ✅ Filtro fecha_fin aplicado: {fecha_fin}")
+            print(f"  ✅ Filtro fecha_fin: {fecha_fin}")
         
         query += " ORDER BY e.id DESC"
         
-        logger.info(f"📝 Query final: {query}")
-        logger.info(f"📝 Params: {params}")
+        print(f"📝 Query: {query}")
+        print(f"📝 Params: {params}")
         
         cursor.execute(query, params)
         resultados = cursor.fetchall()
-        logger.info(f"📊 Resultados encontrados: {len(resultados)}")
-        
-        # Depuración: mostrar los resultados
-        for r in resultados:
-            logger.info(f"  📱 {r['marca']} - {r['modelo']} - {r['estado']}")
+        print(f"📊 Resultados: {len(resultados)}")
         
         return resultados
     except Exception as e:
-        logger.error(f"❌ Error en get_equipos: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"❌ Error: {e}")
         raise
     finally:
         cursor.close()
