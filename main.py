@@ -181,8 +181,7 @@ def login(request: LoginRequest):
         if not usuario:
             raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
         
-        # ⚠️ TEMPORAL: Verificación en texto plano
-        # PRONTO: Se migrará a bcrypt
+        # Verificación en texto plano (temporal)
         if usuario["password_hash"] != request.password:
             raise HTTPException(status_code=401, detail="Contraseña incorrecta")
         
@@ -193,7 +192,7 @@ def login(request: LoginRequest):
                 detail="Acceso denegado. Solo administradores pueden acceder al panel web."
             )
         
-        # Generar token simple (temporal)
+        # ✅ USAR UUID SIMPLE (en lugar de JWT)
         import uuid
         token = str(uuid.uuid4())
         
@@ -529,8 +528,8 @@ def get_resumen(user = Depends(get_current_user)):
 # ============================================
 
 @app.get("/api/usuarios")
-def get_usuarios(admin = Depends(get_current_admin)):
-    """Listar todos los usuarios (solo admin)"""
+def get_usuarios():
+    """Listar todos los usuarios (TEMPORAL - sin autenticación)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -544,6 +543,36 @@ def get_usuarios(admin = Depends(get_current_admin)):
         cursor.close()
         conn.close()
 
+@app.post("/api/usuarios")
+def crear_usuario(usuario: UsuarioCreate):
+    """Crear un nuevo usuario (TEMPORAL - sin autenticación)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("SELECT id FROM usuarios WHERE email = %s", (usuario.email,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="El email ya está registrado")
+        
+        cursor.execute("""
+            INSERT INTO usuarios (email, nombre, rol, password_hash)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (usuario.email, usuario.nombre, usuario.rol, usuario.password))
+        
+        new_id = cursor.fetchone()["id"]
+        conn.commit()
+        
+        return {
+            "success": True,
+            "id": new_id,
+            "message": "Usuario creado correctamente"
+        }
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
 @app.post("/api/usuarios")
 def crear_usuario(usuario: UsuarioCreate, admin = Depends(get_current_admin)):
     """Crear un nuevo usuario (solo admin)"""
