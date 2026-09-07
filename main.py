@@ -429,27 +429,45 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
 # ENDPOINTS - VENTAS (PROTEGIDOS)
 # ============================================
 
+# ============================================
+# ENDPOINTS - VENTAS (PROTEGIDOS)
+# ============================================
+
 @app.post("/api/ventas")
 def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
     """Registrar una venta (admin o vendedor)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        print(f"📝 Registrando venta: equipo_id={venta.equipo_id}")
+        print(f"👤 Usuario: {user.get('sub')}")
+        
         # Verificar que el equipo existe y está disponible
-        cursor.execute("SELECT id, estado FROM equipos WHERE id = %s", (venta.equipo_id,))
+        cursor.execute("SELECT id, estado, imei FROM equipos WHERE id = %s", (venta.equipo_id,))
         equipo = cursor.fetchone()
         if not equipo:
             raise HTTPException(status_code=404, detail="Equipo no encontrado")
         if equipo["estado"] != "disponible":
-            raise HTTPException(status_code=400, detail="El equipo no está disponible")
+            raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado: {equipo['estado']})")
         
         # Obtener el UUID del usuario actual
-        user_id = uuid.UUID(user["sub"])
+        try:
+            user_id = uuid.UUID(user["sub"])
+        except ValueError as e:
+            print(f"❌ Error al convertir UUID: {e}")
+            raise HTTPException(status_code=400, detail=f"Error en el formato del usuario: {str(e)}")
         
         # Registrar la venta
         cursor.execute("""
-            INSERT INTO ventas (equipo_id, vendedor_id, precio_final, metodo_pago, cliente_nombre, cliente_telefono, observaciones)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO ventas (
+                equipo_id, 
+                vendedor_id, 
+                precio_final, 
+                metodo_pago, 
+                cliente_nombre, 
+                cliente_telefono,
+                observaciones
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             venta.equipo_id,
@@ -462,6 +480,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         ))
         
         venta_id = cursor.fetchone()["id"]
+        print(f"✅ Venta registrada: ID={venta_id}")
         
         # Actualizar estado del equipo
         cursor.execute("""
@@ -473,17 +492,28 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         """, (user_id, venta.equipo_id))
         
         conn.commit()
+        print(f"✅ Equipo {equipo['imei']} actualizado a 'vendido'")
         
         return {
             "success": True,
             "venta_id": venta_id,
-            "message": "Venta registrada correctamente"
+            "message": f"Venta registrada correctamente. Equipo: {equipo['imei']}"
         }
+        
+    except HTTPException:
+        raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Error en el formato del usuario: {str(e)}")
+        conn.rollback()
+        print(f"❌ Error de valor: {e}")
+        raise HTTPException(status_code=400, detail=f"Error en los datos: {str(e)}")
     except psycopg2.Error as e:
         conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"❌ Error de base de datos: {e}")
+        raise HTTPException(status_code=500, detail=f"Error en la base de datos: {str(e)}")
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Error inesperado: {e}")
+        raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
     finally:
         cursor.close()
         conn.close()
