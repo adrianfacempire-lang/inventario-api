@@ -802,10 +802,11 @@ def activar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
 def exportar_ventas(
     fecha_inicio: Optional[str] = None, 
     fecha_fin: Optional[str] = None,
-    formato: str = "json",
+    marca: Optional[str] = None,
+    modelo: Optional[str] = None,
     user = Depends(get_current_user)
 ):
-    """Exportar ventas en formato JSON, CSV o Excel"""
+    """Exportar ventas en formato CSV con filtros"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -836,10 +837,23 @@ def exportar_ventas(
             query += " AND DATE(v.fecha_venta) <= %s"
             params.append(fecha_fin)
         
+        if marca:
+            query += " AND ma.nombre ILIKE %s"
+            params.append(f'%{marca}%')
+        
+        if modelo:
+            query += " AND m.nombre ILIKE %s"
+            params.append(f'%{modelo}%')
+        
         query += " ORDER BY v.fecha_venta DESC"
+        
+        print(f"📝 Query exportar: {query}")
+        print(f"📝 Params exportar: {params}")
         
         cursor.execute(query, params)
         datos = cursor.fetchall()
+        
+        print(f"📊 Registros exportados: {len(datos)}")
         
         # Formatear fechas
         for item in datos:
@@ -852,38 +866,14 @@ def exportar_ventas(
             "data": datos,
             "filtros": {
                 "fecha_inicio": fecha_inicio,
-                "fecha_fin": fecha_fin
+                "fecha_fin": fecha_fin,
+                "marca": marca,
+                "modelo": modelo
             }
         }
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.get("/api/reportes/stock-bajo")
-def get_stock_bajo(
-    limite: int = 3,
-    user = Depends(get_current_user)
-):
-    """Obtener productos con stock bajo (menor al límite)"""
-    conn = get_db()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    try:
-        cursor.execute("""
-            SELECT 
-                ma.nombre AS marca,
-                m.nombre AS modelo,
-                COUNT(e.id) AS disponibles,
-                MIN(e.precio_venta) AS precio_desde
-            FROM equipos e
-            JOIN modelos m ON e.modelo_id = m.id
-            JOIN marcas ma ON m.marca_id = ma.id
-            WHERE e.estado = 'disponible'
-            GROUP BY ma.nombre, m.nombre
-            HAVING COUNT(e.id) <= %s
-            ORDER BY COUNT(e.id) ASC
-        """, (limite,))
-        
-        return cursor.fetchall()
+    except Exception as e:
+        print(f"❌ Error en exportar_ventas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
