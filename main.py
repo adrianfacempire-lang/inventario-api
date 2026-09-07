@@ -380,47 +380,61 @@ def buscar_por_imei(imei: str, user = Depends(get_current_user)):
         cursor.close()
         conn.close()
 
-@app.post("/api/equipos")
-def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
-    """Registrar un nuevo equipo (solo admin)"""
+@app.get("/api/equipos")
+def get_equipos(
+    estado: Optional[str] = None,
+    marca: Optional[str] = None,
+    modelo: Optional[str] = None,
+    fecha_inicio: Optional[str] = None,
+    fecha_fin: Optional[str] = None,
+    user = Depends(get_current_user)
+):
+    """Listar equipos con filtros"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        cursor.execute("SELECT id FROM modelos WHERE id = %s", (equipo.modelo_id,))
-        if not cursor.fetchone():
-            raise HTTPException(status_code=404, detail="Modelo no encontrado")
+        query = """
+            SELECT 
+                e.id,
+                e.imei,
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                e.color,
+                e.almacenamiento,
+                e.estado,
+                e.precio_venta,
+                e.fecha_ingreso
+            FROM equipos e
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            WHERE 1=1
+        """
+        params = []
         
-        cursor.execute("SELECT id FROM equipos WHERE imei = %s", (equipo.imei,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=400, detail="El IMEI ya está registrado")
+        if estado:
+            query += " AND e.estado = %s"
+            params.append(estado)
         
-        cursor.execute("""
-            INSERT INTO equipos (
-                modelo_id, imei, color, almacenamiento,
-                precio_compra, precio_venta, observaciones
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (
-            equipo.modelo_id,
-            equipo.imei,
-            equipo.color,
-            equipo.almacenamiento,
-            equipo.precio_compra,
-            equipo.precio_venta,
-            equipo.observaciones
-        ))
+        if marca:
+            query += " AND ma.nombre ILIKE %s"
+            params.append(f'%{marca}%')
         
-        equipo_id = cursor.fetchone()["id"]
-        conn.commit()
+        if modelo:
+            query += " AND m.nombre ILIKE %s"
+            params.append(f'%{modelo}%')
         
-        return {
-            "success": True,
-            "id": equipo_id,
-            "message": "Equipo registrado correctamente"
-        }
-    except psycopg2.Error as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        if fecha_inicio:
+            query += " AND e.fecha_ingreso >= %s"
+            params.append(fecha_inicio)
+        
+        if fecha_fin:
+            query += " AND e.fecha_ingreso <= %s"
+            params.append(fecha_fin)
+        
+        query += " ORDER BY e.id DESC"
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
@@ -528,20 +542,59 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
 # ENDPOINTS - REPORTES (PROTEGIDOS)
 # ============================================
 
-@app.get("/api/reportes/ventas-hoy")
-def get_ventas_hoy(user = Depends(get_current_user)):
-    """Resumen de ventas del día (requiere autenticación)"""
+@app.get("/api/reportes/ventas")
+def get_ventas(
+    fecha_inicio: Optional[str] = None, 
+    fecha_fin: Optional[str] = None,
+    marca: Optional[str] = None,
+    modelo: Optional[str] = None,
+    user = Depends(get_current_user)
+):
+    """Listar ventas con filtros"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        cursor.execute("""
+        query = """
             SELECT 
-                COUNT(*) as total_ventas,
-                COALESCE(SUM(precio_final), 0) as total_ingresos
-            FROM ventas
-            WHERE DATE(fecha_venta) = CURRENT_DATE
-        """)
-        return cursor.fetchone() or {"total_ventas": 0, "total_ingresos": 0}
+                v.id,
+                v.fecha_venta,
+                e.imei,
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                v.precio_final,
+                v.metodo_pago,
+                v.cliente_nombre,
+                u.nombre AS vendedor,
+                v.fecha_venta
+            FROM ventas v
+            JOIN equipos e ON v.equipo_id = e.id
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            LEFT JOIN usuarios u ON v.vendedor_id = u.id
+            WHERE 1=1
+        """
+        params = []
+        
+        if fecha_inicio:
+            query += " AND DATE(v.fecha_venta) >= %s"
+            params.append(fecha_inicio)
+        
+        if fecha_fin:
+            query += " AND DATE(v.fecha_venta) <= %s"
+            params.append(fecha_fin)
+        
+        if marca:
+            query += " AND ma.nombre ILIKE %s"
+            params.append(f'%{marca}%')
+        
+        if modelo:
+            query += " AND m.nombre ILIKE %s"
+            params.append(f'%{modelo}%')
+        
+        query += " ORDER BY v.fecha_venta DESC"
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
@@ -735,6 +788,100 @@ def activar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+# ============================================
+# ENDPOINTS - REPORTES
+# ============================================
+
+@app.get("/api/reportes/exportar/ventas")
+def exportar_ventas(
+    fecha_inicio: Optional[str] = None, 
+    fecha_fin: Optional[str] = None,
+    formato: str = "json",
+    user = Depends(get_current_user)
+):
+    """Exportar ventas en formato JSON, CSV o Excel"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        query = """
+            SELECT 
+                v.fecha_venta AS fecha,
+                e.imei,
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                v.precio_final AS precio,
+                v.metodo_pago AS metodo_pago,
+                v.cliente_nombre AS cliente,
+                u.nombre AS vendedor
+            FROM ventas v
+            JOIN equipos e ON v.equipo_id = e.id
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            LEFT JOIN usuarios u ON v.vendedor_id = u.id
+            WHERE 1=1
+        """
+        params = []
+        
+        if fecha_inicio:
+            query += " AND DATE(v.fecha_venta) >= %s"
+            params.append(fecha_inicio)
+        
+        if fecha_fin:
+            query += " AND DATE(v.fecha_venta) <= %s"
+            params.append(fecha_fin)
+        
+        query += " ORDER BY v.fecha_venta DESC"
+        
+        cursor.execute(query, params)
+        datos = cursor.fetchall()
+        
+        # Formatear fechas
+        for item in datos:
+            if item.get("fecha"):
+                item["fecha"] = item["fecha"].isoformat() if hasattr(item["fecha"], 'isoformat') else str(item["fecha"])
+        
+        return {
+            "success": True,
+            "total": len(datos),
+            "data": datos,
+            "filtros": {
+                "fecha_inicio": fecha_inicio,
+                "fecha_fin": fecha_fin
+            }
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.get("/api/reportes/stock-bajo")
+def get_stock_bajo(
+    limite: int = 3,
+    user = Depends(get_current_user)
+):
+    """Obtener productos con stock bajo (menor al límite)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                COUNT(e.id) AS disponibles,
+                MIN(e.precio_venta) AS precio_desde
+            FROM equipos e
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            WHERE e.estado = 'disponible'
+            GROUP BY ma.nombre, m.nombre
+            HAVING COUNT(e.id) <= %s
+            ORDER BY COUNT(e.id) ASC
+        """, (limite,))
+        
+        return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
