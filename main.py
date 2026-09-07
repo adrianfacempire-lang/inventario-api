@@ -877,7 +877,34 @@ def exportar_ventas(
     finally:
         cursor.close()
         conn.close()
-
+@app.get("/api/reportes/stock-bajo")
+def get_stock_bajo(
+    limite: int = 3,
+    user = Depends(get_current_user)
+):
+    """Obtener productos con stock bajo (menor al límite)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                COUNT(e.id) AS disponibles,
+                MIN(e.precio_venta) AS precio_desde
+            FROM equipos e
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            WHERE e.estado = 'disponible'
+            GROUP BY ma.nombre, m.nombre
+            HAVING COUNT(e.id) <= %s
+            ORDER BY COUNT(e.id) ASC
+        """, (limite,))
+        
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
 # ============================================
 # ENDPOINTS - RETIRAR EQUIPO
 # ============================================
