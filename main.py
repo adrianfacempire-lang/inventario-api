@@ -426,13 +426,13 @@ def get_equipos(
             print(f"  ✅ Filtro estado: {estado}")
         
         if marca and marca != '':
-            # ✅ Usar = para coincidencia exacta (insensible a mayúsculas)
-            query += " AND LOWER(ma.nombre) = LOWER(%s)"
+            # ✅ COINCIDENCIA EXACTA - Usar = en lugar de ILIKE
+            query += " AND ma.nombre = %s"
             params.append(marca)
             print(f"  ✅ Filtro marca (exacto): {marca}")
         
         if modelo and modelo != '':
-            query += " AND LOWER(m.nombre) LIKE LOWER(%s)"
+            query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
             print(f"  ✅ Filtro modelo: {modelo}")
         
