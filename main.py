@@ -805,6 +805,61 @@ def exportar_ventas(
         cursor.close()
         conn.close()
 
+
+# ============================================
+# ENDPOINTS - MARCAS Y MODELOS (ADMIN)
+# ============================================
+
+@app.get("/api/marcas")
+def get_marcas(user = Depends(get_current_user)):
+    """Listar todas las marcas"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("SELECT id, nombre FROM marcas ORDER BY nombre")
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.post("/api/marcas")
+def crear_marca(marca: dict, admin = Depends(get_current_admin)):
+    """Crear una nueva marca (solo admin)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("INSERT INTO marcas (nombre) VALUES (%s) RETURNING id", (marca["nombre"],))
+        new_id = cursor.fetchone()["id"]
+        conn.commit()
+        return {"id": new_id, "nombre": marca["nombre"], "success": True}
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.post("/api/modelos")
+def crear_modelo(modelo: dict, admin = Depends(get_current_admin)):
+    """Crear un nuevo modelo (solo admin)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            INSERT INTO modelos (marca_id, nombre, descripcion) 
+            VALUES (%s, %s, %s) 
+            RETURNING id
+        """, (modelo["marca_id"], modelo["nombre"], modelo.get("descripcion", "")))
+        new_id = cursor.fetchone()["id"]
+        conn.commit()
+        return {"id": new_id, "success": True}
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
 # ============================================
 # ENDPOINTS - USUARIOS (SOLO ADMIN)
 # ============================================
