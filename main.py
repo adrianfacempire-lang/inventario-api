@@ -422,36 +422,36 @@ def get_equipos(
         print(f"  fecha_fin: {fecha_fin}")
         print("=" * 60)
         
-# FILTRO POR MARCA - USANDO = (COINCIDENCIA EXACTA)
-if marca is not None and marca != '':
-    query += " AND ma.nombre = %s"
-    params.append(marca)
-    print(f" ✅ FILTRO MARCA APLICADO: '{marca}'")  # ✅ CORREGIDO
-else:
-    print(" ⚠️ SIN FILTRO MARCA")
-
-# FILTRO POR ESTADO
-if estado is not None and estado != '':
-    query += " AND e.estado = %s"
-    params.append(estado)
-    print(f" ✅ FILTRO ESTADO APLICADO: '{estado}'")  # ✅ CORREGIDO
-
-# FILTRO POR MODELO
-if modelo is not None and modelo != '':
-    query += " AND m.nombre ILIKE %s"
-    params.append(f'%{modelo}%')  # ✅ CORREGIDO (sin comillas extras)
-    print(f" ✅ FILTRO MODELO APLICADO: '{modelo}'")  # ✅ CORREGIDO
-
-# FILTRO POR FECHA
-if fecha_inicio is not None and fecha_inicio != '':
-    query += " AND e.fecha_ingreso >= %s"
-    params.append(fecha_inicio)
-    print(f" ✅ FILTRO FECHA_INICIO APLICADO: '{fecha_inicio}'")
-
-if fecha_fin is not None and fecha_fin != '':
-    query += " AND e.fecha_ingreso <= %s"
-    params.append(fecha_fin)
-    print(f" ✅ FILTRO FECHA_FIN APLICADO: '{fecha_fin}'")
+        # FILTRO POR MARCA
+        if marca is not None and marca != '':
+            query += " AND ma.nombre = %s"
+            params.append(marca)
+            print(f" ✅ FILTRO MARCA APLICADO: '{marca}'")
+        else:
+            print(" ⚠️ SIN FILTRO MARCA")
+        
+        # FILTRO POR ESTADO
+        if estado is not None and estado != '':
+            query += " AND e.estado = %s"
+            params.append(estado)
+            print(f" ✅ FILTRO ESTADO APLICADO: '{estado}'")
+        
+        # FILTRO POR MODELO
+        if modelo is not None and modelo != '':
+            query += " AND m.nombre ILIKE %s"
+            params.append(f'%{modelo}%')
+            print(f" ✅ FILTRO MODELO APLICADO: '{modelo}'")
+        
+        # FILTRO POR FECHA
+        if fecha_inicio is not None and fecha_inicio != '':
+            query += " AND e.fecha_ingreso >= %s"
+            params.append(fecha_inicio)
+            print(f" ✅ FILTRO FECHA_INICIO APLICADO: '{fecha_inicio}'")
+        
+        if fecha_fin is not None and fecha_fin != '':
+            query += " AND e.fecha_ingreso <= %s"
+            params.append(fecha_fin)
+            print(f" ✅ FILTRO FECHA_FIN APLICADO: '{fecha_fin}'")
         
         query += " ORDER BY e.id DESC"
         
@@ -471,6 +471,7 @@ if fecha_fin is not None and fecha_fin != '':
         print("=" * 60)
         
         return resultados
+        
     except Exception as e:
         print(f"❌ ERROR: {e}")
         import traceback
