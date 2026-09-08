@@ -395,6 +395,7 @@ def get_equipos(
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        # Construir la query base
         query = """
             SELECT 
                 e.id,
@@ -414,55 +415,62 @@ def get_equipos(
         params = []
         
         # Logs para depuración
-        print(f"🔍 Parámetros recibidos:")
+        print(f"🔍 Parámetros recibidos en get_equipos:")
         print(f"  estado: {estado}")
         print(f"  marca: {marca}")
         print(f"  modelo: {modelo}")
         print(f"  fecha_inicio: {fecha_inicio}")
         print(f"  fecha_fin: {fecha_fin}")
         
-        if estado:
+        # Aplicar filtros SOLO si tienen valor
+        if estado and estado != '':
             query += " AND e.estado = %s"
             params.append(estado)
-            print(f"  ✅ Filtro estado: {estado}")
+            print(f"  ✅ Filtro estado aplicado: {estado}")
         
-        if marca:
-            # Usar = en lugar de ILIKE para coincidencia exacta
-            query += " AND ma.nombre = %s"
-            params.append(marca)
-            print(f"  ✅ Filtro marca (exacto): {marca}")
+        if marca and marca != '':
+            query += " AND ma.nombre ILIKE %s"
+            params.append(f'%{marca}%')
+            print(f"  ✅ Filtro marca aplicado: {marca}")
         
-        if modelo:
+        if modelo and modelo != '':
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
-            print(f"  ✅ Filtro modelo: {modelo}")
+            print(f"  ✅ Filtro modelo aplicado: {modelo}")
         
-        if fecha_inicio:
+        if fecha_inicio and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
-            print(f"  ✅ Filtro fecha_inicio: {fecha_inicio}")
+            print(f"  ✅ Filtro fecha_inicio aplicado: {fecha_inicio}")
         
-        if fecha_fin:
+        if fecha_fin and fecha_fin != '':
             query += " AND e.fecha_ingreso <= %s"
             params.append(fecha_fin)
-            print(f"  ✅ Filtro fecha_fin: {fecha_fin}")
+            print(f"  ✅ Filtro fecha_fin aplicado: {fecha_fin}")
         
         query += " ORDER BY e.id DESC"
         
-        print(f"📝 Query: {query}")
+        print(f"📝 Query final: {query}")
         print(f"📝 Params: {params}")
         
         cursor.execute(query, params)
         resultados = cursor.fetchall()
-        print(f"📊 Resultados: {len(resultados)}")
+        print(f"📊 Resultados encontrados: {len(resultados)}")
+        
+        # Depuración: mostrar los resultados
+        for r in resultados:
+            print(f"  📱 {r['marca']} - {r['modelo']} - {r['estado']}")
         
         return resultados
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ Error en get_equipos: {e}")
+        import traceback
+        traceback.print_exc()
         raise
     finally:
         cursor.close()
         conn.close()
+
 @app.post("/api/equipos")
 def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
     """Registrar un nuevo equipo (solo admin)"""
