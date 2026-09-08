@@ -391,10 +391,11 @@ def get_equipos(
     fecha_fin: Optional[str] = None,
     user = Depends(get_current_user)
 ):
-    """Listar equipos con filtros"""
+    """Listar equipos con filtros - VERSIÓN CORREGIDA"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
+        # CONSULTA BASE
         query = """
             SELECT 
                 e.id,
@@ -413,63 +414,63 @@ def get_equipos(
         """
         params = []
         
-        # LOGS DE DEPURACIÓN - ESTOS DEBERÍAN APARECER EN RAILWAY
-        print(f"🔍 === FILTROS DE EQUIPOS ===")
+        # REGISTRO DE PARÁMETROS RECIBIDOS
+        print("=" * 60)
+        print("🔍 PARÁMETROS RECIBIDOS:")
         print(f"  estado: {estado}")
         print(f"  marca: {marca}")
         print(f"  modelo: {modelo}")
         print(f"  fecha_inicio: {fecha_inicio}")
         print(f"  fecha_fin: {fecha_fin}")
+        print("=" * 60)
         
-        if estado and estado != '':
-            query += " AND e.estado = %s"
-            params.append(estado)
-            print(f"  ✅ Filtro estado APLICADO: {estado}")
-        else:
-            print(f"  ⚠️ Sin filtro estado")
-        
-        if marca and marca != '':
-            # USAR COINCIDENCIA EXACTA
+        # FILTRO POR MARCA - USANDO = (COINCIDENCIA EXACTA)
+        if marca is not None and marca != '':
             query += " AND ma.nombre = %s"
             params.append(marca)
-            print(f"  ✅ Filtro marca APLICADO (exacto): {marca}")
+            print(f"✅ FILTRO MARCA APLICADO: '{marca}'")
         else:
-            print(f"  ⚠️ Sin filtro marca")
+            print("⚠️ SIN FILTRO MARCA")
         
-        if modelo and modelo != '':
+        # FILTRO POR ESTADO
+        if estado is not None and estado != '':
+            query += " AND e.estado = %s"
+            params.append(estado)
+            print(f"✅ FILTRO ESTADO APLICADO: '{estado}'")
+        
+        # FILTRO POR MODELO
+        if modelo is not None and modelo != '':
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
-            print(f"  ✅ Filtro modelo APLICADO: {modelo}")
-        else:
-            print(f"  ⚠️ Sin filtro modelo")
+            print(f"✅ FILTRO MODELO APLICADO: '{modelo}'")
         
-        if fecha_inicio and fecha_inicio != '':
+        # FILTRO POR FECHA
+        if fecha_inicio is not None and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
-            print(f"  ✅ Filtro fecha_inicio APLICADO: {fecha_inicio}")
-        else:
-            print(f"  ⚠️ Sin filtro fecha_inicio")
+            print(f"✅ FILTRO FECHA_INICIO APLICADO: '{fecha_inicio}'")
         
-        if fecha_fin and fecha_fin != '':
+        if fecha_fin is not None and fecha_fin != '':
             query += " AND e.fecha_ingreso <= %s"
             params.append(fecha_fin)
-            print(f"  ✅ Filtro fecha_fin APLICADO: {fecha_fin}")
-        else:
-            print(f"  ⚠️ Sin filtro fecha_fin")
+            print(f"✅ FILTRO FECHA_FIN APLICADO: '{fecha_fin}'")
         
         query += " ORDER BY e.id DESC"
         
-        print(f"📝 QUERY FINAL: {query}")
-        print(f"📝 PARAMS: {params}")
+        print("=" * 60)
+        print("📝 QUERY SQL:")
+        print(query)
+        print("📝 PARAMETROS:")
+        print(params)
+        print("=" * 60)
         
         cursor.execute(query, params)
         resultados = cursor.fetchall()
-        print(f"📊 RESULTADOS ENCONTRADOS: {len(resultados)}")
         
+        print(f"📊 RESULTADOS ENCONTRADOS: {len(resultados)}")
         for r in resultados:
             print(f"  📱 {r['marca']} - {r['modelo']}")
-        
-        print(f"🔍 === FIN FILTROS ===")
+        print("=" * 60)
         
         return resultados
     except Exception as e:
