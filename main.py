@@ -413,7 +413,8 @@ def get_equipos(
         """
         params = []
         
-        print(f"🔍 Parámetros recibidos:")
+        # LOGS DE DEPURACIÓN - ESTOS DEBERÍAN APARECER EN RAILWAY
+        print(f"🔍 === FILTROS DE EQUIPOS ===")
         print(f"  estado: {estado}")
         print(f"  marca: {marca}")
         print(f"  modelo: {modelo}")
@@ -423,44 +424,58 @@ def get_equipos(
         if estado and estado != '':
             query += " AND e.estado = %s"
             params.append(estado)
-            print(f"  ✅ Filtro estado: {estado}")
+            print(f"  ✅ Filtro estado APLICADO: {estado}")
+        else:
+            print(f"  ⚠️ Sin filtro estado")
         
         if marca and marca != '':
-            # ✅ COINCIDENCIA EXACTA - Usar = en lugar de ILIKE
+            # USAR COINCIDENCIA EXACTA
             query += " AND ma.nombre = %s"
             params.append(marca)
-            print(f"  ✅ Filtro marca (exacto): {marca}")
+            print(f"  ✅ Filtro marca APLICADO (exacto): {marca}")
+        else:
+            print(f"  ⚠️ Sin filtro marca")
         
         if modelo and modelo != '':
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
-            print(f"  ✅ Filtro modelo: {modelo}")
+            print(f"  ✅ Filtro modelo APLICADO: {modelo}")
+        else:
+            print(f"  ⚠️ Sin filtro modelo")
         
         if fecha_inicio and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
-            print(f"  ✅ Filtro fecha_inicio: {fecha_inicio}")
+            print(f"  ✅ Filtro fecha_inicio APLICADO: {fecha_inicio}")
+        else:
+            print(f"  ⚠️ Sin filtro fecha_inicio")
         
         if fecha_fin and fecha_fin != '':
             query += " AND e.fecha_ingreso <= %s"
             params.append(fecha_fin)
-            print(f"  ✅ Filtro fecha_fin: {fecha_fin}")
+            print(f"  ✅ Filtro fecha_fin APLICADO: {fecha_fin}")
+        else:
+            print(f"  ⚠️ Sin filtro fecha_fin")
         
         query += " ORDER BY e.id DESC"
         
-        print(f"📝 Query: {query}")
-        print(f"📝 Params: {params}")
+        print(f"📝 QUERY FINAL: {query}")
+        print(f"📝 PARAMS: {params}")
         
         cursor.execute(query, params)
         resultados = cursor.fetchall()
-        print(f"📊 Resultados: {len(resultados)}")
+        print(f"📊 RESULTADOS ENCONTRADOS: {len(resultados)}")
         
         for r in resultados:
             print(f"  📱 {r['marca']} - {r['modelo']}")
         
+        print(f"🔍 === FIN FILTROS ===")
+        
         return resultados
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         raise
     finally:
         cursor.close()
