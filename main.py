@@ -250,6 +250,108 @@ def migrar_passwords(admin = Depends(get_current_admin)):
         cursor.close()
         conn.close()
 
+
+# ============================================
+# ENDPOINTS - TAC / IMEI
+# ============================================
+
+@app.get("/api/tac/{tac}")
+def get_tac_info(tac: str, user = Depends(get_current_user)):
+    """Buscar información de un TAC (primeros 8 dígitos del IMEI)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Validar que el TAC tenga 8 dígitos
+        if len(tac) != 8 or not tac.isdigit():
+            raise HTTPException(status_code=400, detail="El TAC debe tener 8 dígitos")
+        
+        cursor.execute("""
+            SELECT id, tac, brand, model, model_number
+            FROM device_models
+            WHERE tac = %s
+        """, (tac,))
+        
+        resultado = cursor.fetchone()
+        
+        if not resultado:
+            return {
+                "success": False,
+                "tac": tac,
+                "message": "TAC no encontrado en la base de datos",
+                "brand": None,
+                "model": None,
+                "model_number": None
+            }
+        
+        return {
+            "success": True,
+            "tac": resultado["tac"],
+            "brand": resultado["brand"],
+            "model": resultado["model"],
+            "model_number": resultado["model_number"]
+        }
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.post("/api/tac")
+def crear_tac(data: dict, admin = Depends(get_current_admin)):
+    """Crear un nuevo TAC en el catálogo"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        tac = data.get("tac", "").strip()
+        brand = data.get("brand", "").strip()
+        model = data.get("model", "").strip()
+        model_number = data.get("model_number", "").strip()
+        
+        if len(tac) != 8 or not tac.isdigit():
+            raise HTTPException(status_code=400, detail="El TAC debe tener 8 dígitos")
+        
+        if not brand or not model:
+            raise HTTPException(status_code=400, detail="Marca y modelo son requeridos")
+        
+        cursor.execute("""
+            INSERT INTO device_models (tac, brand, model, model_number)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (tac) DO UPDATE SET
+                brand = EXCLUDED.brand,
+                model = EXCLUDED.model,
+                model_number = EXCLUDED.model_number
+            RETURNING id, tac, brand, model, model_number
+        """, (tac, brand, model, model_number))
+        
+        resultado = cursor.fetchone()
+        conn.commit()
+        
+        return {
+            "success": True,
+            "message": "TAC registrado correctamente",
+            "data": resultado
+        }
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.get("/api/tac")
+def get_all_tacs(user = Depends(get_current_user)):
+    """Listar todos los TACs registrados"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT id, tac, brand, model, model_number, created_at
+            FROM device_models
+            ORDER BY brand, model
+        """)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
 # ============================================
 # ENDPOINTS - PÚBLICOS
 # ============================================
