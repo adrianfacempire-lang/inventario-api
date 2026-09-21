@@ -250,7 +250,46 @@ def migrar_passwords(admin = Depends(get_current_admin)):
         cursor.close()
         conn.close()
 
-
+# ============================================
+# ENDPOINTS - INDENTIFICAR
+# ============================================
+@app.get("/api/equipos/verificar/{imei}")
+def verificar_imei(imei: str, user = Depends(get_current_user)):
+    """Verificar si un IMEI ya está registrado"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT 
+                e.id,
+                e.imei,
+                ma.nombre AS marca,
+                m.nombre AS modelo,
+                e.color,
+                e.almacenamiento,
+                e.estado,
+                e.precio_venta,
+                e.fecha_ingreso
+            FROM equipos e
+            JOIN modelos m ON e.modelo_id = m.id
+            JOIN marcas ma ON m.marca_id = ma.id
+            WHERE e.imei = %s
+        """, (imei,))
+        
+        resultado = cursor.fetchone()
+        
+        if resultado:
+            return {
+                "existe": True,
+                "equipo": resultado
+            }
+        else:
+            return {
+                "existe": False
+            }
+    finally:
+        cursor.close()
+        conn.close()
 # ============================================
 # ENDPOINTS - TAC / IMEI
 # ============================================
