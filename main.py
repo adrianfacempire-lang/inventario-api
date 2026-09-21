@@ -125,10 +125,10 @@ class VentaCreate(BaseModel):
 
 class UsuarioCreate(BaseModel):
     email: str
-    password: str = ""  # Opcional para edición
+    password: str = ""
     nombre: str
     rol: str = "vendedor"
-    activo: bool = True  # Para edición
+    activo: bool = True
 
 class LoginRequest(BaseModel):
     email: str
@@ -158,15 +158,10 @@ def get_db():
 
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
-    """
-    Autenticar usuario según el dispositivo
-    - web: SOLO admins (rol = 'admin')
-    - mobile: admins y vendedores
-    """
+    """Autenticar usuario"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Buscar usuario por email
         cursor.execute("""
             SELECT id, email, nombre, rol, activo, password_hash
             FROM usuarios
@@ -178,18 +173,15 @@ def login(request: LoginRequest):
         if not usuario:
             raise HTTPException(status_code=401, detail="Usuario no encontrado o inactivo")
         
-        # Verificar contraseña con bcrypt
         if not verify_password(request.password, usuario["password_hash"]):
             raise HTTPException(status_code=401, detail="Contraseña incorrecta")
         
-        # REGLA: SOLO ADMINISTRADORES EN PANEL WEB
         if request.device == "web" and usuario["rol"] != "admin":
             raise HTTPException(
                 status_code=403, 
                 detail="Acceso denegado. Solo administradores pueden acceder al panel web."
             )
         
-        # Crear JWT token
         token = create_jwt_token(
             str(usuario["id"]),
             usuario["email"],
@@ -251,8 +243,9 @@ def migrar_passwords(admin = Depends(get_current_admin)):
         conn.close()
 
 # ============================================
-# ENDPOINTS - INDENTIFICAR
+# ENDPOINTS - VERIFICAR IMEI
 # ============================================
+
 @app.get("/api/equipos/verificar/{imei}")
 def verificar_imei(imei: str, user = Depends(get_current_user)):
     """Verificar si un IMEI ya está registrado"""
@@ -290,6 +283,7 @@ def verificar_imei(imei: str, user = Depends(get_current_user)):
     finally:
         cursor.close()
         conn.close()
+
 # ============================================
 # ENDPOINTS - TAC / IMEI
 # ============================================
@@ -300,7 +294,6 @@ def get_tac_info(tac: str, user = Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Validar que el TAC tenga 8 dígitos
         if len(tac) != 8 or not tac.isdigit():
             raise HTTPException(status_code=400, detail="El TAC debe tener 8 dígitos")
         
@@ -497,69 +490,32 @@ def get_equipos(
         """
         params = []
         
-        print("=" * 60)
-        print("🔍 PARÁMETROS RECIBIDOS:")
-        print(f"  estado: {estado}")
-        print(f"  marca: {marca}")
-        print(f"  modelo: {modelo}")
-        print(f"  fecha_inicio: {fecha_inicio}")
-        print(f"  fecha_fin: {fecha_fin}")
-        print("=" * 60)
-        
-        # FILTRO POR MARCA
         if marca is not None and marca != '':
             query += " AND ma.nombre = %s"
             params.append(marca)
-            print(f" ✅ FILTRO MARCA APLICADO: '{marca}'")
-        else:
-            print(" ⚠️ SIN FILTRO MARCA")
         
-        # FILTRO POR ESTADO
         if estado is not None and estado != '':
             query += " AND e.estado = %s"
             params.append(estado)
-            print(f" ✅ FILTRO ESTADO APLICADO: '{estado}'")
         
-        # FILTRO POR MODELO
         if modelo is not None and modelo != '':
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
-            print(f" ✅ FILTRO MODELO APLICADO: '{modelo}'")
         
-        # FILTRO POR FECHA
         if fecha_inicio is not None and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
-            print(f" ✅ FILTRO FECHA_INICIO APLICADO: '{fecha_inicio}'")
         
         if fecha_fin is not None and fecha_fin != '':
             query += " AND e.fecha_ingreso <= %s"
             params.append(fecha_fin)
-            print(f" ✅ FILTRO FECHA_FIN APLICADO: '{fecha_fin}'")
         
         query += " ORDER BY e.id DESC"
         
-        print("=" * 60)
-        print("📝 QUERY SQL:")
-        print(query)
-        print("📝 PARAMETROS:")
-        print(params)
-        print("=" * 60)
-        
         cursor.execute(query, params)
-        resultados = cursor.fetchall()
-        
-        print(f"📊 RESULTADOS ENCONTRADOS: {len(resultados)}")
-        for r in resultados:
-            print(f"  📱 {r['marca']} - {r['modelo']}")
-        print("=" * 60)
-        
-        return resultados
-        
+        return cursor.fetchall()
     except Exception as e:
         print(f"❌ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
         raise
     finally:
         cursor.close()
@@ -593,23 +549,67 @@ def buscar_por_imei(imei: str, user = Depends(get_current_user)):
         cursor.close()
         conn.close()
 
+# ============================================
+# ENDPOINT - REGISTRAR EQUIPO (CON GUARDADO AUTOMÁTICO DE TAC)
+# ============================================
+
 @app.post("/api/equipos")
 def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
-    """Registrar un nuevo equipo (solo admin)"""
+    """Registrar un nuevo equipo (solo admin) - Guarda TAC automáticamente"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Verificar que el modelo existe
-        cursor.execute("SELECT id FROM modelos WHERE id = %s", (equipo.modelo_id,))
-        if not cursor.fetchone():
+        # ============================================
+        # 1. Verificar que el modelo existe
+        # ============================================
+        cursor.execute("""
+            SELECT m.id, m.nombre, ma.nombre AS marca, ma.id AS marca_id
+            FROM modelos m
+            JOIN marcas ma ON m.marca_id = ma.id
+            WHERE m.id = %s
+        """, (equipo.modelo_id,))
+        
+        modelo_info = cursor.fetchone()
+        if not modelo_info:
             raise HTTPException(status_code=404, detail="Modelo no encontrado")
         
-        # Verificar que el IMEI no esté duplicado
+        # ============================================
+        # 2. Verificar que el IMEI no esté duplicado
+        # ============================================
         cursor.execute("SELECT id FROM equipos WHERE imei = %s", (equipo.imei,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="El IMEI ya está registrado")
         
-        # Insertar el equipo
+        # ============================================
+        # 3. Extraer TAC del IMEI (primeros 8 dígitos)
+        # ============================================
+        tac = equipo.imei[:8] if len(equipo.imei) >= 8 else None
+        
+        # ============================================
+        # 4. Verificar si el TAC ya existe y guardarlo si no
+        # ============================================
+        tac_guardado = False
+        if tac:
+            cursor.execute("SELECT id FROM device_models WHERE tac = %s", (tac,))
+            tac_existe = cursor.fetchone()
+            
+            if not tac_existe:
+                # ✅ GUARDAR EL NUEVO TAC AUTOMÁTICAMENTE
+                print(f"📝 Guardando nuevo TAC: {tac} → {modelo_info['marca']} {modelo_info['nombre']}")
+                cursor.execute("""
+                    INSERT INTO device_models (tac, brand, model, model_number)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (tac) DO NOTHING
+                """, (tac, modelo_info['marca'], modelo_info['nombre'], ''))
+                
+                tac_guardado = True
+                print(f"✅ TAC {tac} guardado correctamente")
+            else:
+                print(f"ℹ️ TAC {tac} ya existe en el catálogo")
+        
+        # ============================================
+        # 5. Insertar el equipo
+        # ============================================
         cursor.execute("""
             INSERT INTO equipos (
                 modelo_id, imei, color, almacenamiento,
@@ -629,11 +629,18 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
         equipo_id = cursor.fetchone()["id"]
         conn.commit()
         
+        mensaje = "Equipo registrado correctamente"
+        if tac_guardado:
+            mensaje += f". Nuevo TAC {tac} guardado en el catálogo para futuras consultas"
+        
         return {
             "success": True,
             "id": equipo_id,
-            "message": "Equipo registrado correctamente"
+            "tac": tac,
+            "tac_guardado": tac_guardado,
+            "message": mensaje
         }
+        
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -654,10 +661,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         print(f"📝 === INICIANDO REGISTRO DE VENTA ===")
         print(f"📝 equipo_id: {venta.equipo_id}")
         print(f"📝 precio_final: {venta.precio_final}")
-        print(f"👤 Usuario sub: {user.get('sub')}")
-        print(f"👤 Usuario email: {user.get('email')}")
         
-        # Verificar que el equipo existe y está disponible
         cursor.execute("SELECT id, estado, imei FROM equipos WHERE id = %s", (venta.equipo_id,))
         equipo = cursor.fetchone()
         
@@ -667,20 +671,13 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         if equipo["estado"] != "disponible":
             raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado: {equipo['estado']})")
         
-        # Obtener el ID del usuario actual (como string, sin convertir a UUID)
         user_id_str = user.get("sub")
-        print(f"👤 user_id_str: {user_id_str}")
         
-        # Verificar que el usuario existe en la tabla usuarios
         cursor.execute("SELECT id FROM usuarios WHERE id = %s", (user_id_str,))
         usuario_existe = cursor.fetchone()
         if not usuario_existe:
-            print(f"❌ Usuario no encontrado en la tabla usuarios: {user_id_str}")
             raise HTTPException(status_code=400, detail="Usuario no encontrado en el sistema")
         
-        print(f"✅ Usuario encontrado: {usuario_existe['id']}")
-        
-        # Registrar la venta - usar el ID como string
         cursor.execute("""
             INSERT INTO ventas (
                 equipo_id, 
@@ -694,7 +691,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
             RETURNING id
         """, (
             venta.equipo_id,
-            user_id_str,  # Usar string directamente
+            user_id_str,
             venta.precio_final,
             venta.metodo_pago,
             venta.cliente_nombre,
@@ -703,9 +700,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         ))
         
         venta_id = cursor.fetchone()["id"]
-        print(f"✅ Venta registrada: ID={venta_id}")
         
-        # Actualizar estado del equipo - usar el ID como string
         cursor.execute("""
             UPDATE equipos 
             SET estado = 'vendido', 
@@ -715,8 +710,6 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         """, (user_id_str, venta.equipo_id))
         
         conn.commit()
-        print(f"✅ Equipo {equipo['imei']} actualizado a 'vendido'")
-        print(f"✅ === VENTA COMPLETADA EXITOSAMENTE ===")
         
         return {
             "success": True,
@@ -728,11 +721,9 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         raise
     except psycopg2.Error as e:
         conn.rollback()
-        print(f"❌ Error de base de datos: {e}")
         raise HTTPException(status_code=500, detail=f"Error en la base de datos: {str(e)}")
     except Exception as e:
         conn.rollback()
-        print(f"❌ Error inesperado: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
@@ -915,15 +906,9 @@ def exportar_ventas(
         
         query += " ORDER BY v.fecha_venta DESC"
         
-        print(f"📝 Query exportar: {query}")
-        print(f"📝 Params exportar: {params}")
-        
         cursor.execute(query, params)
         datos = cursor.fetchall()
         
-        print(f"📊 Registros exportados: {len(datos)}")
-        
-        # Formatear fechas
         for item in datos:
             if item.get("fecha"):
                 item["fecha"] = item["fecha"].isoformat() if hasattr(item["fecha"], 'isoformat') else str(item["fecha"])
@@ -940,12 +925,10 @@ def exportar_ventas(
             }
         }
     except Exception as e:
-        print(f"❌ Error en exportar_ventas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
-
 
 # ============================================
 # ENDPOINTS - MARCAS Y MODELOS (ADMIN)
@@ -1027,12 +1010,10 @@ def crear_usuario(usuario: UsuarioCreate, admin = Depends(get_current_admin)):
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Verificar que el email no exista
         cursor.execute("SELECT id FROM usuarios WHERE email = %s", (usuario.email,))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="El email ya está registrado")
         
-        # Hashear contraseña
         hashed_password = hash_password(usuario.password)
         
         cursor.execute("""
@@ -1062,12 +1043,10 @@ def actualizar_usuario(id_usuario: str, usuario: UsuarioCreate, admin = Depends(
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Verificar que el usuario existe
         cursor.execute("SELECT id FROM usuarios WHERE id = %s", (id_usuario,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
         
-        # Hashear nueva contraseña si se proporciona
         hashed_password = hash_password(usuario.password) if usuario.password else None
         
         if hashed_password:
@@ -1146,7 +1125,6 @@ def retirar_equipo(request: RetirarEquipoRequest, admin = Depends(get_current_ad
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Verificar que el equipo existe y está disponible
         cursor.execute("SELECT id, estado, imei FROM equipos WHERE id = %s", (request.equipo_id,))
         equipo = cursor.fetchone()
         
@@ -1156,7 +1134,6 @@ def retirar_equipo(request: RetirarEquipoRequest, admin = Depends(get_current_ad
         if equipo["estado"] != "disponible":
             raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado actual: {equipo['estado']})")
         
-        # Actualizar estado del equipo a 'retirado'
         cursor.execute("""
             UPDATE equipos 
             SET estado = 'retirado', 
