@@ -104,6 +104,7 @@ class EquipoCreate(BaseModel):
     almacenamiento: str
     precio_compra: float
     precio_venta: float
+    ubicacion_id: Optional[int] = None  # ✅ OPCIONAL
     observaciones: Optional[str] = None
 
 class EquipoUpdate(BaseModel):
@@ -114,6 +115,7 @@ class EquipoUpdate(BaseModel):
     almacenamiento: str
     precio_compra: float
     precio_venta: float
+    ubicacion_id: Optional[int] = None  # ✅ OPCIONAL
     observaciones: Optional[str] = None
 
 class VentaCreate(BaseModel):
@@ -234,6 +236,58 @@ def migrar_passwords(admin = Depends(get_current_admin)):
             "message": f"Se actualizaron {actualizados} contraseñas"
         }
     except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+# ============================================
+# ENDPOINTS - UBICACIONES
+# ============================================
+
+class UbicacionCreate(BaseModel):
+    nombre: str
+    tipo: str = "tienda"
+
+@app.get("/api/ubicaciones")
+def get_ubicaciones(user = Depends(get_current_user)):
+    """Listar todas las ubicaciones activas"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("""
+            SELECT id, nombre, tipo
+            FROM ubicaciones
+            WHERE activo = TRUE
+            ORDER BY tipo, nombre
+        """)
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.post("/api/ubicaciones")
+def crear_ubicacion(ubicacion: UbicacionCreate, admin = Depends(get_current_admin)):
+    """Crear una nueva ubicación (solo admin)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        cursor.execute("SELECT id FROM ubicaciones WHERE nombre = %s", (ubicacion.nombre,))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="La ubicación ya existe")
+        
+        cursor.execute("""
+            INSERT INTO ubicaciones (nombre, tipo)
+            VALUES (%s, %s)
+            RETURNING id, nombre, tipo
+        """, (ubicacion.nombre, ubicacion.tipo))
+        
+        resultado = cursor.fetchone()
+        conn.commit()
+        
+        return {"success": True, "data": resultado}
+    except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -438,6 +492,7 @@ def get_equipos(
     estado: Optional[str] = None,
     marca: Optional[str] = None,
     modelo: Optional[str] = None,
+    ubicacion_id: Optional[int] = None,
     fecha_inicio: Optional[str] = None,
     fecha_fin: Optional[str] = None,
     user = Depends(get_current_user)
@@ -459,10 +514,14 @@ def get_equipos(
                 e.precio_compra,
                 e.precio_venta,
                 e.observaciones,
-                e.fecha_ingreso
+                e.fecha_ingreso,
+                e.ubicacion_id,
+                u.nombre AS ubicacion_nombre,
+                u.tipo AS ubicacion_tipo
             FROM equipos e
             JOIN modelos m ON e.modelo_id = m.id
             JOIN marcas ma ON m.marca_id = ma.id
+            LEFT JOIN ubicaciones u ON e.ubicacion_id = u.id
             WHERE 1=1
         """
         params = []
@@ -478,6 +537,10 @@ def get_equipos(
         if modelo is not None and modelo != '':
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
+        
+        if ubicacion_id is not None and ubicacion_id != 0:
+            query += " AND e.ubicacion_id = %s"
+            params.append(ubicacion_id)
         
         if fecha_inicio is not None and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
@@ -497,7 +560,6 @@ def get_equipos(
     finally:
         cursor.close()
         conn.close()
-
 @app.get("/api/equipos/imei/{imei}")
 def buscar_por_imei(imei: str, user = Depends(get_current_user)):
     conn = get_db()
@@ -564,12 +626,12 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
                 """, (tac, modelo_info['marca'], modelo_info['nombre'], ''))
                 tac_guardado = True
         
-        # 5. Insertar equipo
+               # 5. Insertar equipo
         cursor.execute("""
             INSERT INTO equipos (
                 modelo_id, imei, imei2, color, almacenamiento,
-                precio_compra, precio_venta, observaciones
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                precio_compra, precio_venta, ubicacion_id, observaciones
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             equipo.modelo_id,
@@ -579,7 +641,8 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
             equipo.almacenamiento,
             equipo.precio_compra,
             equipo.precio_venta,
-            equipo.observaciones
+            equipo.ubicacion_id,  # ✅ NUEVO (opcional, puede ser None)
+       	    equipo.observaciones
         ))
         
         equipo_id = cursor.fetchone()["id"]
@@ -646,6 +709,7 @@ def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_
                 almacenamiento = %s,
                 precio_compra = %s,
                 precio_venta = %s,
+                ubicacion_id = %s,
                 observaciones = %s
             WHERE id = %s
             RETURNING id
@@ -657,10 +721,10 @@ def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_
             equipo.almacenamiento,
             equipo.precio_compra,
             equipo.precio_venta,
+            equipo.ubicacion_id,  # ✅ NUEVO (opcional, puede ser None)
             equipo.observaciones,
             equipo_id
         ))
-        
         conn.commit()
         
         return {"success": True, "message": "Equipo actualizado correctamente"}
