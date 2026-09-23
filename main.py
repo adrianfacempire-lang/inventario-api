@@ -104,7 +104,7 @@ class EquipoCreate(BaseModel):
     almacenamiento: str
     precio_compra: float
     precio_venta: float
-    ubicacion_id: Optional[int] = None  # ✅ OPCIONAL
+    ubicacion_id: Optional[int] = None
     observaciones: Optional[str] = None
 
 class EquipoUpdate(BaseModel):
@@ -115,7 +115,7 @@ class EquipoUpdate(BaseModel):
     almacenamiento: str
     precio_compra: float
     precio_venta: float
-    ubicacion_id: Optional[int] = None  # ✅ OPCIONAL
+    ubicacion_id: Optional[int] = None
     observaciones: Optional[str] = None
 
 class VentaCreate(BaseModel):
@@ -141,6 +141,10 @@ class LoginRequest(BaseModel):
 class RetirarEquipoRequest(BaseModel):
     equipo_id: int
     razon: str
+
+class UbicacionCreate(BaseModel):
+    nombre: str
+    tipo: str = "tienda"
 
 # ============================================
 # FUNCIONES DE BASE DE DATOS
@@ -245,10 +249,6 @@ def migrar_passwords(admin = Depends(get_current_admin)):
 # ============================================
 # ENDPOINTS - UBICACIONES
 # ============================================
-
-class UbicacionCreate(BaseModel):
-    nombre: str
-    tipo: str = "tienda"
 
 @app.get("/api/ubicaciones")
 def get_ubicaciones(user = Depends(get_current_user)):
@@ -560,6 +560,7 @@ def get_equipos(
     finally:
         cursor.close()
         conn.close()
+
 @app.get("/api/equipos/imei/{imei}")
 def buscar_por_imei(imei: str, user = Depends(get_current_user)):
     conn = get_db()
@@ -626,7 +627,7 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
                 """, (tac, modelo_info['marca'], modelo_info['nombre'], ''))
                 tac_guardado = True
         
-               # 5. Insertar equipo
+        # 5. Insertar equipo
         cursor.execute("""
             INSERT INTO equipos (
                 modelo_id, imei, imei2, color, almacenamiento,
@@ -641,8 +642,8 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
             equipo.almacenamiento,
             equipo.precio_compra,
             equipo.precio_venta,
-            equipo.ubicacion_id,  # ✅ NUEVO (opcional, puede ser None)
-       	    equipo.observaciones
+            equipo.ubicacion_id,
+            equipo.observaciones
         ))
         
         equipo_id = cursor.fetchone()["id"]
@@ -671,27 +672,22 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
 
 @app.put("/api/equipos/{equipo_id}")
 def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_current_admin)):
-    """Actualizar un equipo existente (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # Verificar que el equipo existe
         cursor.execute("SELECT id, estado FROM equipos WHERE id = %s", (equipo_id,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Equipo no encontrado")
         
-        # Verificar modelo
         cursor.execute("SELECT id FROM modelos WHERE id = %s", (equipo.modelo_id,))
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail="Modelo no encontrado")
         
-        # Verificar IMEI duplicado (excluyendo el actual)
         cursor.execute("SELECT id FROM equipos WHERE (imei = %s OR imei2 = %s) AND id != %s", 
                        (equipo.imei, equipo.imei, equipo_id))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="El IMEI ya está registrado en otro equipo")
         
-        # Verificar IMEI2
         imei2_valor = equipo.imei2.strip() if equipo.imei2 and equipo.imei2.strip() != '' else None
         if imei2_valor:
             cursor.execute("SELECT id FROM equipos WHERE (imei = %s OR imei2 = %s) AND id != %s", 
@@ -699,7 +695,6 @@ def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_
             if cursor.fetchone():
                 raise HTTPException(status_code=400, detail="El IMEI 2 ya está registrado en otro equipo")
         
-        # Actualizar
         cursor.execute("""
             UPDATE equipos 
             SET modelo_id = %s,
@@ -721,12 +716,12 @@ def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_
             equipo.almacenamiento,
             equipo.precio_compra,
             equipo.precio_venta,
-            equipo.ubicacion_id,  # ✅ NUEVO (opcional, puede ser None)
+            equipo.ubicacion_id,
             equipo.observaciones,
             equipo_id
         ))
-        conn.commit()
         
+        conn.commit()
         return {"success": True, "message": "Equipo actualizado correctamente"}
         
     except HTTPException:
