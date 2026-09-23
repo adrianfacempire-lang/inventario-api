@@ -102,6 +102,7 @@ class EquipoCreate(BaseModel):
     imei2: Optional[str] = None
     color: str
     almacenamiento: str
+    condicion: str = "nuevo"
     precio_compra: float
     precio_venta: float
     ubicacion_id: Optional[int] = None
@@ -113,6 +114,7 @@ class EquipoUpdate(BaseModel):
     imei2: Optional[str] = None
     color: str
     almacenamiento: str
+    condicion: str = "nuevo"
     precio_compra: float
     precio_venta: float
     ubicacion_id: Optional[int] = None
@@ -312,6 +314,7 @@ def verificar_imei(imei: str, user = Depends(get_current_user)):
                 m.nombre AS modelo,
                 e.color,
                 e.almacenamiento,
+                e.condicion,
                 e.estado,
                 e.precio_venta,
                 e.fecha_ingreso
@@ -493,6 +496,7 @@ def get_equipos(
     marca: Optional[str] = None,
     modelo: Optional[str] = None,
     ubicacion_id: Optional[int] = None,
+    condicion: Optional[str] = None,
     fecha_inicio: Optional[str] = None,
     fecha_fin: Optional[str] = None,
     user = Depends(get_current_user)
@@ -510,6 +514,7 @@ def get_equipos(
                 m.id AS modelo_id,
                 e.color,
                 e.almacenamiento,
+                e.condicion,
                 e.estado,
                 e.precio_compra,
                 e.precio_venta,
@@ -542,6 +547,10 @@ def get_equipos(
             query += " AND e.ubicacion_id = %s"
             params.append(ubicacion_id)
         
+        if condicion is not None and condicion != '':
+            query += " AND e.condicion = %s"
+            params.append(condicion)
+        
         if fecha_inicio is not None and fecha_inicio != '':
             query += " AND e.fecha_ingreso >= %s"
             params.append(fecha_inicio)
@@ -570,7 +579,7 @@ def buscar_por_imei(imei: str, user = Depends(get_current_user)):
             SELECT 
                 e.id, e.imei, e.imei2,
                 ma.nombre AS marca, m.nombre AS modelo,
-                e.color, e.almacenamiento, e.estado, e.precio_venta
+                e.color, e.almacenamiento, e.condicion, e.estado, e.precio_venta
             FROM equipos e
             JOIN modelos m ON e.modelo_id = m.id
             JOIN marcas ma ON m.marca_id = ma.id
@@ -588,7 +597,6 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # 1. Verificar modelo
         cursor.execute("""
             SELECT m.id, m.nombre, ma.nombre AS marca, ma.id AS marca_id
             FROM modelos m
@@ -600,19 +608,16 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
         if not modelo_info:
             raise HTTPException(status_code=404, detail="Modelo no encontrado")
         
-        # 2. Verificar IMEI duplicado
         cursor.execute("SELECT id FROM equipos WHERE imei = %s OR imei2 = %s", (equipo.imei, equipo.imei))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="El IMEI ya está registrado")
         
-        # 3. Verificar IMEI2 si se proporciona
         imei2_valor = equipo.imei2.strip() if equipo.imei2 and equipo.imei2.strip() != '' else None
         if imei2_valor:
             cursor.execute("SELECT id FROM equipos WHERE imei = %s OR imei2 = %s", (imei2_valor, imei2_valor))
             if cursor.fetchone():
                 raise HTTPException(status_code=400, detail="El IMEI 2 ya está registrado")
         
-        # 4. Guardar TAC automáticamente
         tac = equipo.imei[:8] if len(equipo.imei) >= 8 else None
         tac_guardado = False
         
@@ -627,12 +632,11 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
                 """, (tac, modelo_info['marca'], modelo_info['nombre'], ''))
                 tac_guardado = True
         
-        # 5. Insertar equipo
         cursor.execute("""
             INSERT INTO equipos (
-                modelo_id, imei, imei2, color, almacenamiento,
+                modelo_id, imei, imei2, color, almacenamiento, condicion,
                 precio_compra, precio_venta, ubicacion_id, observaciones
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             equipo.modelo_id,
@@ -640,6 +644,7 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
             imei2_valor,
             equipo.color,
             equipo.almacenamiento,
+            equipo.condicion,
             equipo.precio_compra,
             equipo.precio_venta,
             equipo.ubicacion_id,
@@ -702,6 +707,7 @@ def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_
                 imei2 = %s,
                 color = %s,
                 almacenamiento = %s,
+                condicion = %s,
                 precio_compra = %s,
                 precio_venta = %s,
                 ubicacion_id = %s,
@@ -714,6 +720,7 @@ def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_
             imei2_valor,
             equipo.color,
             equipo.almacenamiento,
+            equipo.condicion,
             equipo.precio_compra,
             equipo.precio_venta,
             equipo.ubicacion_id,
