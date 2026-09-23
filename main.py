@@ -16,7 +16,6 @@ import jwt
 
 DATABASE_URL = "postgresql://postgres.tziufvisbvljkvhnbneu:11CNSQJUQ0s1vuGUDELtqG@aws-0-us-east-2.pooler.supabase.com:5432/postgres"
 
-# Clave secreta para JWT - ¡CAMBIAR EN PRODUCCIÓN!
 SECRET_KEY = "tu_clave_secreta_muy_segura_cambiar_en_produccion_2026"
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
@@ -29,7 +28,6 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,12 +41,10 @@ app.add_middleware(
 # ============================================
 
 def hash_password(password: str) -> str:
-    """Hashear una contraseña con bcrypt"""
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
 
 def verify_password(password: str, hashed: str) -> bool:
-    """Verificar una contraseña contra su hash"""
     if not hashed:
         return False
     try:
@@ -57,7 +53,6 @@ def verify_password(password: str, hashed: str) -> bool:
         return False
 
 def create_jwt_token(user_id: str, email: str, rol: str) -> str:
-    """Crear un token JWT"""
     payload = {
         "sub": user_id,
         "email": email,
@@ -68,7 +63,6 @@ def create_jwt_token(user_id: str, email: str, rol: str) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 def verify_jwt_token(token: str) -> dict:
-    """Verificar un token JWT"""
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         return payload
@@ -78,26 +72,22 @@ def verify_jwt_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Token inválido.")
 
 # ============================================
-# DEPENDENCIAS PARA PROTEGER ENDPOINTS
+# DEPENDENCIAS
 # ============================================
 
 def get_current_user(authorization: str = Header(None)):
-    """Obtener el usuario actual desde el token JWT"""
     if not authorization:
         raise HTTPException(status_code=401, detail="Token requerido. Inicia sesión primero.")
-    
     try:
         scheme, token = authorization.split(" ")
         if scheme.lower() != "bearer":
             raise HTTPException(status_code=401, detail="Formato de token inválido. Usa 'Bearer [token]'")
-        
         payload = verify_jwt_token(token)
         return payload
     except ValueError:
         raise HTTPException(status_code=401, detail="Formato de token inválido.")
 
 def get_current_admin(user = Depends(get_current_user)):
-    """Verificar que el usuario sea admin"""
     if user.get("rol") != "admin":
         raise HTTPException(status_code=403, detail="Se requieren permisos de administrador.")
     return user
@@ -109,6 +99,17 @@ def get_current_admin(user = Depends(get_current_user)):
 class EquipoCreate(BaseModel):
     modelo_id: int
     imei: str
+    imei2: Optional[str] = None
+    color: str
+    almacenamiento: str
+    precio_compra: float
+    precio_venta: float
+    observaciones: Optional[str] = None
+
+class EquipoUpdate(BaseModel):
+    modelo_id: int
+    imei: str
+    imei2: Optional[str] = None
     color: str
     almacenamiento: str
     precio_compra: float
@@ -144,7 +145,6 @@ class RetirarEquipoRequest(BaseModel):
 # ============================================
 
 def get_db():
-    """Obtener conexión a la base de datos"""
     try:
         conn = psycopg2.connect(DATABASE_URL)
         return conn
@@ -158,7 +158,6 @@ def get_db():
 
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
-    """Autenticar usuario"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -207,7 +206,6 @@ def login(request: LoginRequest):
 
 @app.post("/api/auth/migrar-passwords")
 def migrar_passwords(admin = Depends(get_current_admin)):
-    """Migrar contraseñas en texto plano a hashed (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -248,7 +246,6 @@ def migrar_passwords(admin = Depends(get_current_admin)):
 
 @app.get("/api/equipos/verificar/{imei}")
 def verificar_imei(imei: str, user = Depends(get_current_user)):
-    """Verificar si un IMEI ya está registrado"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -256,6 +253,7 @@ def verificar_imei(imei: str, user = Depends(get_current_user)):
             SELECT 
                 e.id,
                 e.imei,
+                e.imei2,
                 ma.nombre AS marca,
                 m.nombre AS modelo,
                 e.color,
@@ -266,20 +264,15 @@ def verificar_imei(imei: str, user = Depends(get_current_user)):
             FROM equipos e
             JOIN modelos m ON e.modelo_id = m.id
             JOIN marcas ma ON m.marca_id = ma.id
-            WHERE e.imei = %s
-        """, (imei,))
+            WHERE e.imei = %s OR e.imei2 = %s
+        """, (imei, imei))
         
         resultado = cursor.fetchone()
         
         if resultado:
-            return {
-                "existe": True,
-                "equipo": resultado
-            }
+            return {"existe": True, "equipo": resultado}
         else:
-            return {
-                "existe": False
-            }
+            return {"existe": False}
     finally:
         cursor.close()
         conn.close()
@@ -290,7 +283,6 @@ def verificar_imei(imei: str, user = Depends(get_current_user)):
 
 @app.get("/api/tac/{tac}")
 def get_tac_info(tac: str, user = Depends(get_current_user)):
-    """Buscar información de un TAC (primeros 8 dígitos del IMEI)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -328,7 +320,6 @@ def get_tac_info(tac: str, user = Depends(get_current_user)):
 
 @app.post("/api/tac")
 def crear_tac(data: dict, admin = Depends(get_current_admin)):
-    """Crear un nuevo TAC en el catálogo"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -356,11 +347,7 @@ def crear_tac(data: dict, admin = Depends(get_current_admin)):
         resultado = cursor.fetchone()
         conn.commit()
         
-        return {
-            "success": True,
-            "message": "TAC registrado correctamente",
-            "data": resultado
-        }
+        return {"success": True, "message": "TAC registrado correctamente", "data": resultado}
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -370,7 +357,6 @@ def crear_tac(data: dict, admin = Depends(get_current_admin)):
 
 @app.get("/api/tac")
 def get_all_tacs(user = Depends(get_current_user)):
-    """Listar todos los TACs registrados"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -390,16 +376,10 @@ def get_all_tacs(user = Depends(get_current_user)):
 
 @app.get("/")
 def root():
-    return {
-        "message": "API Inventario Teléfonos",
-        "version": "2.0.0",
-        "status": "online",
-        "secure": True
-    }
+    return {"message": "API Inventario Teléfonos", "version": "2.0.0", "status": "online", "secure": True}
 
 @app.get("/api/health")
 def health_check():
-    """Verificar que la API está funcionando"""
     try:
         conn = get_db()
         cursor = conn.cursor()
@@ -410,13 +390,8 @@ def health_check():
     except Exception as e:
         return {"status": "unhealthy", "database": "error", "error": str(e)}
 
-# ============================================
-# ENDPOINTS - STOCK Y MODELOS (PÚBLICOS)
-# ============================================
-
 @app.get("/api/stock")
 def get_stock():
-    """Obtener stock disponible por modelo (público)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -440,7 +415,6 @@ def get_stock():
 
 @app.get("/api/modelos")
 def get_modelos():
-    """Listar todos los modelos (público)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -456,7 +430,7 @@ def get_modelos():
         conn.close()
 
 # ============================================
-# ENDPOINTS - EQUIPOS (PROTEGIDOS)
+# ENDPOINTS - EQUIPOS
 # ============================================
 
 @app.get("/api/equipos")
@@ -468,7 +442,6 @@ def get_equipos(
     fecha_fin: Optional[str] = None,
     user = Depends(get_current_user)
 ):
-    """Listar equipos con filtros"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -476,12 +449,16 @@ def get_equipos(
             SELECT 
                 e.id,
                 e.imei,
+                e.imei2,
                 ma.nombre AS marca,
                 m.nombre AS modelo,
+                m.id AS modelo_id,
                 e.color,
                 e.almacenamiento,
                 e.estado,
+                e.precio_compra,
                 e.precio_venta,
+                e.observaciones,
                 e.fecha_ingreso
             FROM equipos e
             JOIN modelos m ON e.modelo_id = m.id
@@ -523,45 +500,32 @@ def get_equipos(
 
 @app.get("/api/equipos/imei/{imei}")
 def buscar_por_imei(imei: str, user = Depends(get_current_user)):
-    """Buscar equipos por IMEI (requiere autenticación)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         cursor.execute("""
             SELECT 
-                e.id,
-                e.imei,
-                ma.nombre AS marca,
-                m.nombre AS modelo,
-                e.color,
-                e.almacenamiento,
-                e.estado,
-                e.precio_venta
+                e.id, e.imei, e.imei2,
+                ma.nombre AS marca, m.nombre AS modelo,
+                e.color, e.almacenamiento, e.estado, e.precio_venta
             FROM equipos e
             JOIN modelos m ON e.modelo_id = m.id
             JOIN marcas ma ON m.marca_id = ma.id
-            WHERE e.imei ILIKE %s
+            WHERE (e.imei ILIKE %s OR e.imei2 ILIKE %s)
             AND e.estado = 'disponible'
             LIMIT 10
-        """, (f'%{imei}%',))
+        """, (f'%{imei}%', f'%{imei}%'))
         return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
 
-# ============================================
-# ENDPOINT - REGISTRAR EQUIPO (CON GUARDADO AUTOMÁTICO DE TAC)
-# ============================================
-
 @app.post("/api/equipos")
 def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
-    """Registrar un nuevo equipo (solo admin) - Guarda TAC automáticamente"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        # ============================================
-        # 1. Verificar que el modelo existe
-        # ============================================
+        # 1. Verificar modelo
         cursor.execute("""
             SELECT m.id, m.nombre, ma.nombre AS marca, ma.id AS marca_id
             FROM modelos m
@@ -573,52 +537,44 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
         if not modelo_info:
             raise HTTPException(status_code=404, detail="Modelo no encontrado")
         
-        # ============================================
-        # 2. Verificar que el IMEI no esté duplicado
-        # ============================================
-        cursor.execute("SELECT id FROM equipos WHERE imei = %s", (equipo.imei,))
+        # 2. Verificar IMEI duplicado
+        cursor.execute("SELECT id FROM equipos WHERE imei = %s OR imei2 = %s", (equipo.imei, equipo.imei))
         if cursor.fetchone():
             raise HTTPException(status_code=400, detail="El IMEI ya está registrado")
         
-        # ============================================
-        # 3. Extraer TAC del IMEI (primeros 8 dígitos)
-        # ============================================
-        tac = equipo.imei[:8] if len(equipo.imei) >= 8 else None
+        # 3. Verificar IMEI2 si se proporciona
+        imei2_valor = equipo.imei2.strip() if equipo.imei2 and equipo.imei2.strip() != '' else None
+        if imei2_valor:
+            cursor.execute("SELECT id FROM equipos WHERE imei = %s OR imei2 = %s", (imei2_valor, imei2_valor))
+            if cursor.fetchone():
+                raise HTTPException(status_code=400, detail="El IMEI 2 ya está registrado")
         
-        # ============================================
-        # 4. Verificar si el TAC ya existe y guardarlo si no
-        # ============================================
+        # 4. Guardar TAC automáticamente
+        tac = equipo.imei[:8] if len(equipo.imei) >= 8 else None
         tac_guardado = False
+        
         if tac:
             cursor.execute("SELECT id FROM device_models WHERE tac = %s", (tac,))
-            tac_existe = cursor.fetchone()
-            
-            if not tac_existe:
-                # ✅ GUARDAR EL NUEVO TAC AUTOMÁTICAMENTE
+            if not cursor.fetchone():
                 print(f"📝 Guardando nuevo TAC: {tac} → {modelo_info['marca']} {modelo_info['nombre']}")
                 cursor.execute("""
                     INSERT INTO device_models (tac, brand, model, model_number)
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (tac) DO NOTHING
                 """, (tac, modelo_info['marca'], modelo_info['nombre'], ''))
-                
                 tac_guardado = True
-                print(f"✅ TAC {tac} guardado correctamente")
-            else:
-                print(f"ℹ️ TAC {tac} ya existe en el catálogo")
         
-        # ============================================
-        # 5. Insertar el equipo
-        # ============================================
+        # 5. Insertar equipo
         cursor.execute("""
             INSERT INTO equipos (
-                modelo_id, imei, color, almacenamiento,
+                modelo_id, imei, imei2, color, almacenamiento,
                 precio_compra, precio_venta, observaciones
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             equipo.modelo_id,
             equipo.imei,
+            imei2_valor,
             equipo.color,
             equipo.almacenamiento,
             equipo.precio_compra,
@@ -631,7 +587,7 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
         
         mensaje = "Equipo registrado correctamente"
         if tac_guardado:
-            mensaje += f". Nuevo TAC {tac} guardado en el catálogo para futuras consultas"
+            mensaje += f". Nuevo TAC {tac} guardado en el catálogo"
         
         return {
             "success": True,
@@ -641,6 +597,76 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
             "message": mensaje
         }
         
+    except HTTPException:
+        raise
+    except psycopg2.Error as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.put("/api/equipos/{equipo_id}")
+def actualizar_equipo(equipo_id: int, equipo: EquipoUpdate, admin = Depends(get_current_admin)):
+    """Actualizar un equipo existente (solo admin)"""
+    conn = get_db()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        # Verificar que el equipo existe
+        cursor.execute("SELECT id, estado FROM equipos WHERE id = %s", (equipo_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Equipo no encontrado")
+        
+        # Verificar modelo
+        cursor.execute("SELECT id FROM modelos WHERE id = %s", (equipo.modelo_id,))
+        if not cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Modelo no encontrado")
+        
+        # Verificar IMEI duplicado (excluyendo el actual)
+        cursor.execute("SELECT id FROM equipos WHERE (imei = %s OR imei2 = %s) AND id != %s", 
+                       (equipo.imei, equipo.imei, equipo_id))
+        if cursor.fetchone():
+            raise HTTPException(status_code=400, detail="El IMEI ya está registrado en otro equipo")
+        
+        # Verificar IMEI2
+        imei2_valor = equipo.imei2.strip() if equipo.imei2 and equipo.imei2.strip() != '' else None
+        if imei2_valor:
+            cursor.execute("SELECT id FROM equipos WHERE (imei = %s OR imei2 = %s) AND id != %s", 
+                           (imei2_valor, imei2_valor, equipo_id))
+            if cursor.fetchone():
+                raise HTTPException(status_code=400, detail="El IMEI 2 ya está registrado en otro equipo")
+        
+        # Actualizar
+        cursor.execute("""
+            UPDATE equipos 
+            SET modelo_id = %s,
+                imei = %s,
+                imei2 = %s,
+                color = %s,
+                almacenamiento = %s,
+                precio_compra = %s,
+                precio_venta = %s,
+                observaciones = %s
+            WHERE id = %s
+            RETURNING id
+        """, (
+            equipo.modelo_id,
+            equipo.imei,
+            imei2_valor,
+            equipo.color,
+            equipo.almacenamiento,
+            equipo.precio_compra,
+            equipo.precio_venta,
+            equipo.observaciones,
+            equipo_id
+        ))
+        
+        conn.commit()
+        
+        return {"success": True, "message": "Equipo actualizado correctamente"}
+        
+    except HTTPException:
+        raise
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -649,19 +675,14 @@ def registrar_equipo(equipo: EquipoCreate, admin = Depends(get_current_admin)):
         conn.close()
 
 # ============================================
-# ENDPOINTS - VENTAS (PROTEGIDOS)
+# ENDPOINTS - VENTAS
 # ============================================
 
 @app.post("/api/ventas")
 def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
-    """Registrar una venta (admin o vendedor)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
-        print(f"📝 === INICIANDO REGISTRO DE VENTA ===")
-        print(f"📝 equipo_id: {venta.equipo_id}")
-        print(f"📝 precio_final: {venta.precio_final}")
-        
         cursor.execute("SELECT id, estado, imei FROM equipos WHERE id = %s", (venta.equipo_id,))
         equipo = cursor.fetchone()
         
@@ -674,28 +695,18 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         user_id_str = user.get("sub")
         
         cursor.execute("SELECT id FROM usuarios WHERE id = %s", (user_id_str,))
-        usuario_existe = cursor.fetchone()
-        if not usuario_existe:
+        if not cursor.fetchone():
             raise HTTPException(status_code=400, detail="Usuario no encontrado en el sistema")
         
         cursor.execute("""
             INSERT INTO ventas (
-                equipo_id, 
-                vendedor_id, 
-                precio_final, 
-                metodo_pago, 
-                cliente_nombre, 
-                cliente_telefono,
-                observaciones
+                equipo_id, vendedor_id, precio_final, metodo_pago,
+                cliente_nombre, cliente_telefono, observaciones
             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-            venta.equipo_id,
-            user_id_str,
-            venta.precio_final,
-            venta.metodo_pago,
-            venta.cliente_nombre,
-            venta.cliente_telefono,
+            venta.equipo_id, user_id_str, venta.precio_final,
+            venta.metodo_pago, venta.cliente_nombre, venta.cliente_telefono,
             venta.observaciones
         ))
         
@@ -703,9 +714,7 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         
         cursor.execute("""
             UPDATE equipos 
-            SET estado = 'vendido', 
-                fecha_venta = NOW(), 
-                vendido_por = %s 
+            SET estado = 'vendido', fecha_venta = NOW(), vendido_por = %s 
             WHERE id = %s
         """, (user_id_str, venta.equipo_id))
         
@@ -724,15 +733,13 @@ def registrar_venta(venta: VentaCreate, user = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"Error en la base de datos: {str(e)}")
     except Exception as e:
         conn.rollback()
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
     finally:
         cursor.close()
         conn.close()
 
 # ============================================
-# ENDPOINTS - REPORTES (PROTEGIDOS)
+# ENDPOINTS - REPORTES
 # ============================================
 
 @app.get("/api/reportes/ventas")
@@ -743,20 +750,14 @@ def get_ventas(
     modelo: Optional[str] = None,
     user = Depends(get_current_user)
 ):
-    """Listar ventas con filtros"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         query = """
             SELECT 
-                v.id,
-                v.fecha_venta,
-                e.imei,
-                ma.nombre AS marca,
-                m.nombre AS modelo,
-                v.precio_final,
-                v.metodo_pago,
-                v.cliente_nombre,
+                v.id, v.fecha_venta, e.imei,
+                ma.nombre AS marca, m.nombre AS modelo,
+                v.precio_final, v.metodo_pago, v.cliente_nombre,
                 u.nombre AS vendedor
             FROM ventas v
             JOIN equipos e ON v.equipo_id = e.id
@@ -793,7 +794,6 @@ def get_ventas(
 
 @app.get("/api/reportes/ventas-hoy")
 def get_ventas_hoy(user = Depends(get_current_user)):
-    """Resumen de ventas del día"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -812,7 +812,6 @@ def get_ventas_hoy(user = Depends(get_current_user)):
 
 @app.get("/api/reportes/resumen")
 def get_resumen(user = Depends(get_current_user)):
-    """Resumen general del inventario"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -829,20 +828,14 @@ def get_resumen(user = Depends(get_current_user)):
         conn.close()
 
 @app.get("/api/reportes/stock-bajo")
-def get_stock_bajo(
-    limite: int = 3,
-    user = Depends(get_current_user)
-):
-    """Obtener productos con stock bajo (menor al límite)"""
+def get_stock_bajo(limite: int = 3, user = Depends(get_current_user)):
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         cursor.execute("""
             SELECT 
-                ma.nombre AS marca,
-                m.nombre AS modelo,
-                COUNT(e.id) AS disponibles,
-                MIN(e.precio_venta) AS precio_desde
+                ma.nombre AS marca, m.nombre AS modelo,
+                COUNT(e.id) AS disponibles, MIN(e.precio_venta) AS precio_desde
             FROM equipos e
             JOIN modelos m ON e.modelo_id = m.id
             JOIN marcas ma ON m.marca_id = ma.id
@@ -851,7 +844,6 @@ def get_stock_bajo(
             HAVING COUNT(e.id) <= %s
             ORDER BY COUNT(e.id) ASC
         """, (limite,))
-        
         return cursor.fetchall()
     finally:
         cursor.close()
@@ -865,20 +857,15 @@ def exportar_ventas(
     modelo: Optional[str] = None,
     user = Depends(get_current_user)
 ):
-    """Exportar ventas en formato CSV con filtros"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         query = """
             SELECT 
-                v.fecha_venta AS fecha,
-                e.imei,
-                ma.nombre AS marca,
-                m.nombre AS modelo,
-                v.precio_final AS precio,
-                v.metodo_pago AS metodo_pago,
-                v.cliente_nombre AS cliente,
-                u.nombre AS vendedor
+                v.fecha_venta AS fecha, e.imei,
+                ma.nombre AS marca, m.nombre AS modelo,
+                v.precio_final AS precio, v.metodo_pago AS metodo_pago,
+                v.cliente_nombre AS cliente, u.nombre AS vendedor
             FROM ventas v
             JOIN equipos e ON v.equipo_id = e.id
             JOIN modelos m ON e.modelo_id = m.id
@@ -891,15 +878,12 @@ def exportar_ventas(
         if fecha_inicio:
             query += " AND DATE(v.fecha_venta) >= %s"
             params.append(fecha_inicio)
-        
         if fecha_fin:
             query += " AND DATE(v.fecha_venta) <= %s"
             params.append(fecha_fin)
-        
         if marca:
             query += " AND ma.nombre ILIKE %s"
             params.append(f'%{marca}%')
-        
         if modelo:
             query += " AND m.nombre ILIKE %s"
             params.append(f'%{modelo}%')
@@ -913,17 +897,7 @@ def exportar_ventas(
             if item.get("fecha"):
                 item["fecha"] = item["fecha"].isoformat() if hasattr(item["fecha"], 'isoformat') else str(item["fecha"])
         
-        return {
-            "success": True,
-            "total": len(datos),
-            "data": datos,
-            "filtros": {
-                "fecha_inicio": fecha_inicio,
-                "fecha_fin": fecha_fin,
-                "marca": marca,
-                "modelo": modelo
-            }
-        }
+        return {"success": True, "total": len(datos), "data": datos}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -931,12 +905,11 @@ def exportar_ventas(
         conn.close()
 
 # ============================================
-# ENDPOINTS - MARCAS Y MODELOS (ADMIN)
+# ENDPOINTS - MARCAS Y MODELOS
 # ============================================
 
 @app.get("/api/marcas")
 def get_marcas(user = Depends(get_current_user)):
-    """Listar todas las marcas"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -948,7 +921,6 @@ def get_marcas(user = Depends(get_current_user)):
 
 @app.post("/api/marcas")
 def crear_marca(marca: dict, admin = Depends(get_current_admin)):
-    """Crear una nueva marca (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -965,14 +937,12 @@ def crear_marca(marca: dict, admin = Depends(get_current_admin)):
 
 @app.post("/api/modelos")
 def crear_modelo(modelo: dict, admin = Depends(get_current_admin)):
-    """Crear un nuevo modelo (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         cursor.execute("""
             INSERT INTO modelos (marca_id, nombre, descripcion) 
-            VALUES (%s, %s, %s) 
-            RETURNING id
+            VALUES (%s, %s, %s) RETURNING id
         """, (modelo["marca_id"], modelo["nombre"], modelo.get("descripcion", "")))
         new_id = cursor.fetchone()["id"]
         conn.commit()
@@ -985,19 +955,17 @@ def crear_modelo(modelo: dict, admin = Depends(get_current_admin)):
         conn.close()
 
 # ============================================
-# ENDPOINTS - USUARIOS (SOLO ADMIN)
+# ENDPOINTS - USUARIOS
 # ============================================
 
 @app.get("/api/usuarios")
 def get_usuarios(admin = Depends(get_current_admin)):
-    """Listar todos los usuarios (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
         cursor.execute("""
             SELECT id, email, nombre, rol, activo
-            FROM usuarios
-            ORDER BY created_at DESC
+            FROM usuarios ORDER BY created_at DESC
         """)
         return cursor.fetchall()
     finally:
@@ -1006,7 +974,6 @@ def get_usuarios(admin = Depends(get_current_admin)):
 
 @app.post("/api/usuarios")
 def crear_usuario(usuario: UsuarioCreate, admin = Depends(get_current_admin)):
-    """Crear un nuevo usuario (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -1018,18 +985,13 @@ def crear_usuario(usuario: UsuarioCreate, admin = Depends(get_current_admin)):
         
         cursor.execute("""
             INSERT INTO usuarios (email, nombre, rol, password_hash)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
+            VALUES (%s, %s, %s, %s) RETURNING id
         """, (usuario.email, usuario.nombre, usuario.rol, hashed_password))
         
         new_id = cursor.fetchone()["id"]
         conn.commit()
         
-        return {
-            "success": True,
-            "id": new_id,
-            "message": "Usuario creado correctamente"
-        }
+        return {"success": True, "id": new_id, "message": "Usuario creado correctamente"}
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
@@ -1039,7 +1001,6 @@ def crear_usuario(usuario: UsuarioCreate, admin = Depends(get_current_admin)):
 
 @app.put("/api/usuarios/{id_usuario}")
 def actualizar_usuario(id_usuario: str, usuario: UsuarioCreate, admin = Depends(get_current_admin)):
-    """Actualizar un usuario (solo admin)"""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -1051,14 +1012,12 @@ def actualizar_usuario(id_usuario: str, usuario: UsuarioCreate, admin = Depends(
         
         if hashed_password:
             cursor.execute("""
-                UPDATE usuarios 
-                SET email = %s, nombre = %s, rol = %s, password_hash = %s
+                UPDATE usuarios SET email = %s, nombre = %s, rol = %s, password_hash = %s
                 WHERE id = %s
             """, (usuario.email, usuario.nombre, usuario.rol, hashed_password, id_usuario))
         else:
             cursor.execute("""
-                UPDATE usuarios 
-                SET email = %s, nombre = %s, rol = %s
+                UPDATE usuarios SET email = %s, nombre = %s, rol = %s
                 WHERE id = %s
             """, (usuario.email, usuario.nombre, usuario.rol, id_usuario))
         
@@ -1073,17 +1032,12 @@ def actualizar_usuario(id_usuario: str, usuario: UsuarioCreate, admin = Depends(
 
 @app.delete("/api/usuarios/{id_usuario}")
 def eliminar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
-    """Eliminar (desactivar) un usuario (solo admin)"""
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("""
-            UPDATE usuarios SET activo = FALSE WHERE id = %s
-        """, (id_usuario,))
-        
+        cursor.execute("UPDATE usuarios SET activo = FALSE WHERE id = %s", (id_usuario,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        
         conn.commit()
         return {"success": True, "message": "Usuario desactivado correctamente"}
     except psycopg2.Error as e:
@@ -1095,17 +1049,12 @@ def eliminar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
 
 @app.put("/api/usuarios/{id_usuario}/activar")
 def activar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
-    """Activar un usuario (solo admin)"""
     conn = get_db()
     cursor = conn.cursor()
     try:
-        cursor.execute("""
-            UPDATE usuarios SET activo = TRUE WHERE id = %s
-        """, (id_usuario,))
-        
+        cursor.execute("UPDATE usuarios SET activo = TRUE WHERE id = %s", (id_usuario,))
         if cursor.rowcount == 0:
             raise HTTPException(status_code=404, detail="Usuario no encontrado")
-        
         conn.commit()
         return {"success": True, "message": "Usuario activado correctamente"}
     except psycopg2.Error as e:
@@ -1121,7 +1070,6 @@ def activar_usuario(id_usuario: str, admin = Depends(get_current_admin)):
 
 @app.put("/api/equipos/retirar")
 def retirar_equipo(request: RetirarEquipoRequest, admin = Depends(get_current_admin)):
-    """Retirar un equipo (solo admin) - por daño, falla, etc."""
     conn = get_db()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     try:
@@ -1132,23 +1080,18 @@ def retirar_equipo(request: RetirarEquipoRequest, admin = Depends(get_current_ad
             raise HTTPException(status_code=404, detail="Equipo no encontrado")
         
         if equipo["estado"] != "disponible":
-            raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado actual: {equipo['estado']})")
+            raise HTTPException(status_code=400, detail=f"El equipo no está disponible (estado: {equipo['estado']})")
         
         cursor.execute("""
             UPDATE equipos 
             SET estado = 'retirado', 
                 observaciones = COALESCE(observaciones, '') || ' | RETIRADO: ' || %s || ' - ' || NOW()::text
-            WHERE id = %s
-            RETURNING id
+            WHERE id = %s RETURNING id
         """, (request.razon, request.equipo_id))
         
         conn.commit()
         
-        return {
-            "success": True,
-            "message": f"Equipo {equipo['imei']} retirado correctamente. Razón: {request.razon}"
-        }
-        
+        return {"success": True, "message": f"Equipo {equipo['imei']} retirado correctamente. Razón: {request.razon}"}
     except psycopg2.Error as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
